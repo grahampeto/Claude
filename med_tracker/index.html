@@ -3,131 +3,158 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#0f766e">
 <title>Pill Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
+/* Layout: one narrow column, order status first, two big log buttons, then stock per medication. */
 :root {
-  --bg: #f6f7f9; --card: #ffffff; --ink: #111827; --muted: #6b7280; --line: #e5e7eb;
-  --accent: #0f766e; --accent-ink: #ffffff;
-  --ok: #15803d; --ok-bg: #dcfce7; --warn: #b45309; --warn-bg: #fef3c7; --bad: #b91c1c; --bad-bg: #fee2e2;
+  --bg: #f3f6f5; --card: #ffffff; --ink: #14201d; --muted: #5d6b67; --line: #dde5e2;
+  --accent: #0e6b5c; --accent-ink: #ffffff;
+  --ok: #17663a; --ok-bg: #dcf3e4; --warn: #8a4b06; --warn-bg: #fdf0d5; --bad: #a3221b; --bad-bg: #fbe1de;
+  --font: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b0f14; --card: #151b23; --ink: #e5e7eb; --muted: #9ca3af; --line: #263040;
-    --accent: #2dd4bf; --accent-ink: #042f2e;
-    --ok: #4ade80; --ok-bg: #052e16; --warn: #fbbf24; --warn-bg: #3a2a06; --bad: #f87171; --bad-bg: #3b0d0d;
+  :root:not([data-theme="light"]) {
+    --bg: #0c1312; --card: #141d1b; --ink: #e3ebe8; --muted: #93a39e; --line: #25332f;
+    --accent: #3cc4a9; --accent-ink: #062a23;
+    --ok: #6fdc98; --ok-bg: #0f2c1b; --warn: #f2bf5e; --warn-bg: #33250b; --bad: #f58a80; --bad-bg: #3a1311;
+    color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #0c1312; --card: #141d1b; --ink: #e3ebe8; --muted: #93a39e; --line: #25332f;
+  --accent: #3cc4a9; --accent-ink: #062a23;
+  --ok: #6fdc98; --ok-bg: #0f2c1b; --warn: #f2bf5e; --warn-bg: #33250b; --bad: #f58a80; --bad-bg: #3a1311;
+  color-scheme: dark;
+}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink);
-  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { max-width: 720px; margin: 0 auto; padding: 16px 16px 96px; }
-h1 { font-size: 1.4rem; margin: 8px 0 16px; }
-h2 { font-size: 1.05rem; margin: 0 0 12px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--font); }
+main { max-width: 680px; margin: 0 auto; padding-block: 16px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 16px; }
+h1 { font-size: 1.5rem; margin: 4px 0 0; text-wrap: balance; }
+h2 { font-size: 1.05rem; margin: 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
 .muted { color: var(--muted); font-size: .9rem; }
-.banner { border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+.banner { border-radius: 12px; padding: 16px; }
 .banner.ok { background: var(--ok-bg); color: var(--ok); }
 .banner.warn { background: var(--warn-bg); color: var(--warn); }
 .banner.bad { background: var(--bad-bg); color: var(--bad); }
-.banner strong { display: block; font-size: 1.15rem; margin-bottom: 4px; }
+.banner strong { display: block; font-size: 1.2rem; margin-bottom: 4px; }
 .banner ul { margin: 6px 0 0; padding-left: 20px; }
-.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.banner .sub { margin-top: 8px; font-size: .9rem; opacity: .9; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
   border-radius: 10px; padding: 10px 14px; cursor: pointer; }
-button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-button.big { padding: 14px; }
-button.link { border: none; background: none; color: var(--accent); padding: 4px 6px; }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+button.big { padding: 16px 12px; }
+button.link { border: none; background: none; color: var(--accent); padding: 4px 6px; font-weight: 700; }
+button.danger { color: var(--bad); }
 button:disabled { opacity: .5; cursor: default; }
+.head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .med { border-top: 1px solid var(--line); padding: 12px 0; }
-.med:first-of-type { border-top: none; padding-top: 0; }
-.med-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.med-name { font-weight: 600; }
-.pill { display: inline-block; font-size: .8rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
-.pill.ok { background: var(--ok-bg); color: var(--ok); }
-.pill.warn { background: var(--warn-bg); color: var(--warn); }
-.pill.bad { background: var(--bad-bg); color: var(--bad); }
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
-.stat b { display: block; font-size: 1.1rem; }
+.med:first-child { border-top: none; padding-top: 4px; }
+.med-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.med-name { font-weight: 700; min-width: 0; }
+.chip { display: inline-block; font-size: .8rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+.chip.bad { background: var(--bad-bg); color: var(--bad); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.stat b { display: block; font-size: 1.15rem; }
 .stat span { color: var(--muted); font-size: .8rem; }
+.short { color: var(--warn); font-size: .9rem; margin-top: 6px; }
 label { display: block; font-size: .9rem; margin: 10px 0 4px; color: var(--muted); }
 input { font: inherit; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--bg); color: var(--ink); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
-.qty-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; align-items: center; padding: 6px 0; }
+.qty-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; align-items: center; padding: 6px 0; font-variant-numeric: tabular-nums; }
+.qty-row label { margin: 0; color: var(--ink); }
 .qty-row input { text-align: right; }
-.history-item { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: .92rem; }
+.history-item { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: .92rem; }
 .history-item:first-child { border-top: none; }
-dialog { border: none; border-radius: 16px; padding: 0; width: min(520px, calc(100vw - 32px));
+.history-item > span { min-width: 0; }
+dialog { border: none; border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px));
   background: var(--card); color: var(--ink); }
-dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog::backdrop { background: rgba(0,0,0,.5); }
 dialog form { padding: 18px; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.err { color: var(--bad); font-size: .9rem; margin-top: 8px; min-height: 1em; }
-.footer-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.err { color: var(--bad); font-size: .9rem; margin-top: 8px; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; }
+#sync { font-size: .85rem; }
+#toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: .95rem; max-width: calc(100vw - 32px); }
+@media (max-width: 380px) { .actions, .row { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
+
 <main>
-  <h1>💊 Pill Tracker</h1>
+  <div>
+    <h1>Pill Tracker</h1>
+    <div id="sync" class="muted">Loading…</div>
+  </div>
 
   <div id="banner"></div>
 
   <div class="actions">
-    <button class="primary big" id="btnPickup">📦 Got pills from pharmacy</button>
-    <button class="primary big" id="btnFill">🗓️ Filled my dispenser</button>
+    <button class="primary big" id="btnPickup">Got pills from pharmacy</button>
+    <button class="primary big" id="btnFill">Filled my dispenser</button>
   </div>
 
   <section class="card">
-    <div class="med-head"><h2>My medications</h2><button class="link" id="btnAddMed">+ Add</button></div>
+    <div class="head"><h2>My medications</h2><button class="link" id="btnAddMed">+ Add medication</button></div>
     <div id="meds"></div>
   </section>
 
   <section class="card">
-    <h2>History</h2>
+    <div class="head"><h2>History</h2></div>
     <div id="history"></div>
   </section>
 
   <section class="card">
-    <h2>Settings &amp; backup</h2>
+    <h2>Settings and backup</h2>
     <div class="row">
       <div><label for="setLead">Order this many days before running out</label><input id="setLead" type="number" min="0" inputmode="numeric"></div>
       <div><label for="setCycle">I order every … days</label><input id="setCycle" type="number" min="1" inputmode="numeric"></div>
     </div>
     <div class="row">
-      <div><label for="setFill">Dispenser holds … days</label><input id="setFill" type="number" min="1" inputmode="numeric"></div>
+      <div><label for="setFill">My dispenser holds … days</label><input id="setFill" type="number" min="1" inputmode="numeric"></div>
       <div></div>
     </div>
-    <p class="muted">Data is stored only in this browser on this device. Export a backup now and then.</p>
-    <div class="footer-tools">
+    <p class="muted">Export a backup file now and then, so you have a copy of your counts.</p>
+    <div class="tools">
       <button id="btnExport">Export backup</button>
       <button id="btnImport">Import backup</button>
-      <input id="fileImport" type="file" accept="application/json" hidden>
+      <input id="fileImport" type="file" accept="application/json,.json" hidden>
     </div>
   </section>
 </main>
+
+<div id="toast" role="status" hidden></div>
 
 <!-- Add / edit medication -->
 <dialog id="dlgMed">
   <form method="dialog" id="formMed">
     <h2 id="medTitle">Add medication</h2>
-    <label for="mName">Name &amp; strength</label>
-    <input id="mName" required placeholder="e.g. Metformin 500 mg">
+    <label for="mName">Name and strength</label>
+    <input id="mName" placeholder="e.g. Metformin 500 mg">
     <div class="row">
-      <div><label for="mPerDay">Pills per day</label><input id="mPerDay" type="number" min="0.25" step="0.25" required inputmode="decimal"></div>
-      <div><label for="mPack">Pills per pharmacy pickup</label><input id="mPack" type="number" min="1" required inputmode="numeric"></div>
+      <div><label for="mPerDay">Pills per day</label><input id="mPerDay" type="number" min="0.25" step="0.25" inputmode="decimal"></div>
+      <div><label for="mPack">Pills per pharmacy pickup</label><input id="mPack" type="number" min="1" inputmode="numeric"></div>
     </div>
     <div class="row">
-      <div><label for="mStock">Loose pills at home now<br><span class="muted">(not in the dispenser)</span></label><input id="mStock" type="number" min="0" step="0.25" required inputmode="decimal"></div>
-      <div><label for="mDisp">Pills in dispenser now</label><input id="mDisp" type="number" min="0" step="0.25" inputmode="decimal"></div>
+      <div><label for="mStock">Loose pills at home now (not in the dispenser)</label><input id="mStock" type="number" min="0" step="0.25" inputmode="decimal"></div>
+      <div><label for="mDisp">Pills in the dispenser now</label><input id="mDisp" type="number" min="0" step="0.25" inputmode="decimal"></div>
     </div>
     <div class="err" id="medErr"></div>
     <div class="dialog-actions">
-      <button type="button" class="link" id="btnDeleteMed" hidden style="margin-right:auto;color:var(--bad)">Delete</button>
-      <button value="cancel" formnovalidate>Cancel</button>
-      <button class="primary" value="save" id="btnSaveMed">Save</button>
+      <button type="button" class="link danger" id="btnDeleteMed" style="margin-right:auto">Delete</button>
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save</button>
     </div>
   </form>
 </dialog>
@@ -136,12 +163,12 @@ dialog form { padding: 18px; }
 <dialog id="dlgPickup">
   <form method="dialog" id="formPickup">
     <h2>Pharmacy pickup</h2>
-    <label for="pDate">Date</label><input id="pDate" type="date" required>
-    <p class="muted">How many pills of each did you get? Use 0 for any you didn't collect.</p>
+    <label for="pDate">Date</label><input id="pDate" type="date">
+    <p class="muted">How many pills of each did you get? Enter 0 for any you didn't collect.</p>
     <div id="pickupRows"></div>
     <div class="dialog-actions">
-      <button value="cancel" formnovalidate>Cancel</button>
-      <button class="primary" value="save">Save pickup</button>
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save pickup</button>
     </div>
   </form>
 </dialog>
@@ -149,17 +176,28 @@ dialog form { padding: 18px; }
 <!-- Fill dispenser -->
 <dialog id="dlgFill">
   <form method="dialog" id="formFill">
-    <h2>Filled dispenser</h2>
+    <h2>Filled my dispenser</h2>
     <div class="row">
-      <div><label for="fDate">Date</label><input id="fDate" type="date" required></div>
-      <div><label for="fDays">Days filled</label><input id="fDays" type="number" min="1" required inputmode="numeric"></div>
+      <div><label for="fDate">Date</label><input id="fDate" type="date"></div>
+      <div><label for="fDays">Days filled</label><input id="fDays" type="number" min="1" inputmode="numeric"></div>
     </div>
     <p class="muted">Pills moved from your loose stock into the dispenser:</p>
     <div id="fillRows"></div>
     <div class="err" id="fillErr"></div>
     <div class="dialog-actions">
-      <button value="cancel" formnovalidate>Cancel</button>
-      <button class="primary" value="save">Save fill</button>
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save fill</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- In-page confirmation (browser confirm() is not available everywhere) -->
+<dialog id="dlgConfirm">
+  <form method="dialog" id="formConfirm">
+    <p id="confirmText" style="margin-top:0"></p>
+    <div class="dialog-actions">
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary" id="confirmOk">Yes</button>
     </div>
   </form>
 </dialog>
@@ -168,6 +206,7 @@ dialog form { padding: 18px; }
 "use strict";
 const KEY = "pill-tracker-v1";
 const DAY = 86400000;
+const $ = id => document.getElementById(id);
 
 // ---------- dates (local calendar days, no timezone drift) ----------
 function todayISO() { const d = new Date(); return iso(d.getFullYear(), d.getMonth(), d.getDate()); }
@@ -180,25 +219,69 @@ function fmt(s) { const [y, m, d] = s.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }); }
 function rel(n) { return n === 0 ? "today" : n === 1 ? "tomorrow" : n === -1 ? "yesterday" : n > 0 ? `in ${n} days` : `${-n} days ago`; }
 function num(n) { return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, ""); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+// ---------- small UI helpers ----------
+let toastTimer;
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3500); }
+function ask(text, okLabel = "Yes") {
+  return new Promise(resolve => {
+    $("confirmText").textContent = text; $("confirmOk").textContent = okLabel;
+    const dlg = $("dlgConfirm");
+    const done = v => { dlg.removeEventListener("close", onClose); resolve(v); };
+    const onClose = () => done(dlg.returnValue === "ok");
+    dlg.returnValue = ""; dlg.addEventListener("close", onClose); dlg.showModal();
+  });
+}
+$("formConfirm").addEventListener("submit", e => { e.preventDefault(); $("dlgConfirm").close("ok"); });
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
 
 // ---------- state ----------
 // Each med: { id, name, perDay, pack, stock, disp, dispAsOf }
-//   stock    = loose pills at home (outside the dispenser)
-//   disp     = pills in the dispenser as of dispAsOf; they get taken at perDay from that date
-let state = load();
+//   stock = loose pills at home (outside the dispenser)
+//   disp  = pills in the dispenser on dispAsOf; they are taken at perDay from that date on
 function blank() { return { meds: [], history: [], settings: { leadDays: 7, cycleDays: 30, fillDays: 7 } }; }
-function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.meds)) return { ...blank(), ...s, settings: { ...blank().settings, ...s.settings } }; }
-  catch (e) {}
-  return blank();
-}
-function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { alert("Couldn't save — storage is unavailable in this browser."); } render(); }
+function normalize(s) { return { ...blank(), ...s, settings: { ...blank().settings, ...(s && s.settings) } }; }
+function readLocal() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.meds)) return normalize(s); } catch (e) {} return null; }
+function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+let state = readLocal() || blank();
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
-// Record an action with a snapshot of the meds beforehand so it can be undone.
-function record(text) {
-  state.history.unshift({ id: uid(), at: todayISO(), text, before: JSON.stringify(state.meds) });
-  state.history = state.history.slice(0, 200);
+// Storage: your private record in your Claude account when available, otherwise this browser only.
+let cloud = null;           // DocumentReference for data/users/<you>/tracker
+let writing = Promise.resolve();
+let dirty = false;
+function setSync(text) { $("sync").textContent = text; }
+async function initCloud() {
+  if (!window.claude || !window.claude.use) { setSync("Saved in this browser only."); return; }
+  try {
+    const [db, user] = await Promise.all([claude.use("db"), claude.use("user")]);
+    const me = user && await user.id();
+    if (!db || !me) { setSync("Saved in this browser only."); return; }
+    cloud = db.doc(`data/users/${me}/tracker`);
+    const snap = await cloud.get();
+    if (snap.exists && snap.data() && Array.isArray(snap.data().meds)) {
+      if (!dirty) { state = normalize(snap.data()); writeLocal(); render(); }
+      else push();
+    } else if (state.meds.length) push();
+    setSync("Saved privately to your Claude account. Only you can see it.");
+  } catch (e) {
+    cloud = null; setSync("Couldn't reach your Claude account. Saved in this browser only.");
+  }
+}
+function push() {
+  if (!cloud) return;
+  const snapshot = JSON.parse(JSON.stringify(state));
+  writing = writing.then(() => cloud.set(snapshot)).catch(e => {
+    setSync(e && e.code === "quota_exceeded" ? "Your history is too large to save. Undo less often or import a smaller backup." : "Last change wasn't saved to your account. It is kept in this browser.");
+  });
+}
+function save() { dirty = true; writeLocal(); push(); render(); }
+
+// Record an action with a snapshot of the medications beforehand so it can be undone.
+function record(text, extra = {}) {
+  state.history.unshift({ id: uid(), date: todayISO(), text, before: JSON.stringify(state.meds), ...extra });
+  state.history = state.history.slice(0, 120);
 }
 
 // ---------- calculations ----------
@@ -206,49 +289,42 @@ function dispLeft(m, today) {
   const taken = Math.max(0, diffDays(today, m.dispAsOf || today)) * m.perDay;
   return Math.max(0, (m.disp || 0) - taken);
 }
-function project(m, today = todayISO()) {
+function project(m, today) {
   const { leadDays, cycleDays, fillDays } = state.settings;
   const inDisp = dispLeft(m, today);
-  const onHand = m.stock + inDisp;
-  const daysLeft = m.perDay > 0 ? Math.floor(onHand / m.perDay) : Infinity;
-  const runOut = daysLeft === Infinity ? null : addDays(today, daysLeft);
-  const orderBy = runOut ? addDays(runOut, -leadDays) : null;
-  const orderIn = orderBy ? diffDays(orderBy, today) : Infinity;
-  const nextFillShort = m.stock < m.perDay * fillDays;
-  let level = "ok";
-  if (orderIn <= 0) level = "bad";
-  else if (orderIn <= cycleDays) level = "warn";   // must be on this month's order
-  return { inDisp, onHand, daysLeft, runOut, orderBy, orderIn, nextFillShort, level };
+  const daysLeft = Math.floor((m.stock + inDisp) / m.perDay);
+  const runOut = addDays(today, daysLeft);
+  const orderBy = addDays(runOut, -leadDays);
+  const orderIn = diffDays(orderBy, today);
+  const level = orderIn <= 0 ? "bad" : orderIn <= cycleDays ? "warn" : "ok";
+  return { inDisp, daysLeft, runOut, orderBy, orderIn, level, short: m.stock < m.perDay * fillDays };
 }
 function nextFillDate() {
-  const fills = state.history.filter(h => h.kind === "fill");
-  if (!fills.length) return null;
-  return addDays(fills[0].date, fills[0].days);
+  const f = state.history.find(h => h.kind === "fill");
+  return f ? addDays(f.date, f.days) : null;
 }
 
 // ---------- render ----------
-const $ = id => document.getElementById(id);
-function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-
+const LABEL = { bad: "Order now", warn: "Order this month", ok: "Stocked" };
 function render() {
   const today = todayISO();
-  const projs = state.meds.map(m => ({ m, p: project(m, today) }));
+  const projs = state.meds.map(m => ({ m, p: project(m, today) })).sort((a, b) => a.p.orderIn - b.p.orderIn);
 
-  // Banner: what to order and when
   let html;
   if (!state.meds.length) {
-    html = `<div class="banner warn"><strong>Start by adding your medications</strong>Tap “+ Add” below and enter how many pills you have right now.</div>`;
+    html = `<div class="banner warn"><strong>Add your medications to start</strong>Tap “+ Add medication” and enter how many pills you have right now. The tracker then works out when to order.</div>`;
   } else {
-    const due = projs.filter(x => x.p.level !== "ok").sort((a, b) => a.p.orderIn - b.p.orderIn);
-    const soonest = projs.filter(x => x.p.orderBy).sort((a, b) => a.p.orderIn - b.p.orderIn)[0];
-    if (due.some(x => x.p.level === "bad")) {
-      html = `<div class="banner bad"><strong>Order now</strong>Put these on your order:<ul>${due.map(x => `<li>${esc(x.m.name)} — runs out ${fmt(x.p.runOut)} (${rel(diffDays(x.p.runOut, today))})</li>`).join("")}</ul></div>`;
-    } else if (soonest) {
-      html = `<div class="banner ${due.length ? "warn" : "ok"}"><strong>Next order by ${fmt(soonest.p.orderBy)} (${rel(soonest.p.orderIn)})</strong>` +
-        (due.length ? `Include on this month's order:<ul>${due.map(x => `<li>${esc(x.m.name)} — order by ${fmt(x.p.orderBy)}</li>`).join("")}</ul>` : `Everything is well stocked for the next ${state.settings.cycleDays} days.`) + `</div>`;
-    } else html = `<div class="banner ok"><strong>All good</strong></div>`;
+    const due = projs.filter(x => x.p.level !== "ok");
+    const first = projs[0];
     const nf = nextFillDate();
-    if (nf) html += `<p class="muted" style="margin:-8px 0 16px">Next dispenser fill: ${fmt(nf)} (${rel(diffDays(nf, today))})</p>`;
+    const fillLine = nf ? `<div class="sub">Next dispenser fill: ${fmt(nf)} (${rel(diffDays(nf, today))})</div>` : "";
+    if (first.p.level === "bad") {
+      html = `<div class="banner bad"><strong>Order now</strong>Put these on your order:<ul>${due.map(x => `<li>${esc(x.m.name)}: runs out ${fmt(x.p.runOut)} (${rel(diffDays(x.p.runOut, today))})</li>`).join("")}</ul>${fillLine}</div>`;
+    } else {
+      html = `<div class="banner ${due.length ? "warn" : "ok"}"><strong>Next order by ${fmt(first.p.orderBy)} (${rel(first.p.orderIn)})</strong>` +
+        (due.length ? `Include on this month's order:<ul>${due.map(x => `<li>${esc(x.m.name)}: order by ${fmt(x.p.orderBy)}</li>`).join("")}</ul>`
+                    : `Everything is stocked for the next ${state.settings.cycleDays} days.`) + fillLine + `</div>`;
+    }
   }
   $("banner").innerHTML = html;
 
@@ -256,21 +332,20 @@ function render() {
     <div class="med">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
-        <span><span class="pill ${p.level}">${p.level === "bad" ? "Order now" : p.level === "warn" ? "Order this month" : "OK"}</span>
-        <button class="link" data-edit="${m.id}">Edit</button></span>
+        <span><span class="chip ${p.level}">${LABEL[p.level]}</span> <button class="link" data-edit="${m.id}">Edit</button></span>
       </div>
-      <div class="muted">${num(m.perDay)} per day · ${num(m.pack)} per pickup</div>
+      <div class="muted">${num(m.perDay)} a day · ${num(m.pack)} per pickup</div>
       <div class="stats">
         <div class="stat"><b>${num(m.stock)}</b><span>loose at home</span></div>
         <div class="stat"><b>${num(p.inDisp)}</b><span>in dispenser</span></div>
-        <div class="stat"><b>${p.daysLeft === Infinity ? "–" : p.daysLeft + " d"}</b><span>${p.runOut ? "until " + fmt(p.runOut) : "supply"}</span></div>
+        <div class="stat"><b>${p.daysLeft} days</b><span>until ${fmt(p.runOut)}</span></div>
       </div>
-      ${p.nextFillShort ? `<div class="muted" style="color:var(--warn);margin-top:6px">⚠ Not enough loose pills for a full ${state.settings.fillDays}-day fill (need ${num(m.perDay * state.settings.fillDays)}).</div>` : ""}
+      ${p.short ? `<div class="short">Not enough loose pills for a full ${state.settings.fillDays}-day fill (needs ${num(m.perDay * state.settings.fillDays)}).</div>` : ""}
     </div>`).join("") : `<p class="muted">No medications yet.</p>`;
 
   $("history").innerHTML = state.history.length ? state.history.slice(0, 30).map((h, i) => `
-    <div class="history-item"><span><span class="muted">${fmt(h.date || h.at)}</span> — ${esc(h.text)}</span>
-    ${i === 0 ? `<button class="link" id="btnUndo">Undo</button>` : ""}</div>`).join("") : `<p class="muted">Nothing logged yet.</p>`;
+    <div class="history-item"><span><span class="muted">${fmt(h.date)}</span> · ${esc(h.text)}</span>
+    ${i === 0 ? `<button class="link" id="btnUndo">Undo</button>` : ""}</div>`).join("") : `<p class="muted">Pickups and dispenser fills you log appear here.</p>`;
   if ($("btnUndo")) $("btnUndo").onclick = undo;
 
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openMed(b.dataset.edit));
@@ -280,79 +355,80 @@ function render() {
   $("setFill").value = state.settings.fillDays;
 }
 
-function undo() {
+async function undo() {
   const h = state.history[0];
-  if (!h || !confirm(`Undo “${h.text}”?`)) return;
+  if (!h || !await ask(`Undo “${h.text}”?`, "Undo")) return;
   state.meds = JSON.parse(h.before);
   state.history.shift();
-  save();
+  save(); toast("Undone");
 }
 
 // ---------- medication dialog ----------
 let editing = null;
 function openMed(id) {
   editing = id ? state.meds.find(m => m.id === id) : null;
-  const today = todayISO();
   $("medTitle").textContent = editing ? "Edit medication" : "Add medication";
   $("mName").value = editing ? editing.name : "";
   $("mPerDay").value = editing ? editing.perDay : 1;
   $("mPack").value = editing ? editing.pack : 30;
   $("mStock").value = editing ? editing.stock : "";
-  $("mDisp").value = editing ? num(dispLeft(editing, today)) : 0;
+  $("mDisp").value = editing ? num(dispLeft(editing, todayISO())) : 0;
   $("btnDeleteMed").hidden = !editing;
   $("medErr").textContent = "";
   $("dlgMed").showModal();
 }
 $("btnAddMed").onclick = () => openMed(null);
-$("btnDeleteMed").onclick = () => {
-  if (!editing || !confirm(`Delete ${editing.name}?`)) return;
-  record(`Deleted ${editing.name}`);
-  state.meds = state.meds.filter(m => m !== editing);
-  $("dlgMed").close(); save();
+$("btnDeleteMed").onclick = async () => {
+  const m = editing; if (!m) return;
+  $("dlgMed").close();
+  if (!await ask(`Delete ${m.name}? You can undo this from History.`, "Delete")) return;
+  record(`Deleted ${m.name}`);
+  state.meds = state.meds.filter(x => x.id !== m.id);
+  save(); toast(`Deleted ${m.name}`);
 };
 $("formMed").addEventListener("submit", e => {
-  if (e.submitter && e.submitter.value !== "save") return;
+  e.preventDefault();
   const name = $("mName").value.trim(), perDay = +$("mPerDay").value, pack = +$("mPack").value,
-        stock = +$("mStock").value, disp = +$("mDisp").value || 0;
-  if (!name || !(perDay > 0) || !(pack > 0) || !(stock >= 0) || !(disp >= 0)) {
-    e.preventDefault(); $("medErr").textContent = "Please fill in every field with a valid number."; return;
-  }
-  const today = todayISO();
+        stock = $("mStock").value === "" ? NaN : +$("mStock").value, disp = +$("mDisp").value || 0;
+  if (!name) { $("medErr").textContent = "Enter the medication's name."; return; }
+  if (!(perDay > 0)) { $("medErr").textContent = "Pills per day must be more than 0."; return; }
+  if (!(pack > 0)) { $("medErr").textContent = "Pills per pickup must be more than 0."; return; }
+  if (!(stock >= 0) || !(disp >= 0)) { $("medErr").textContent = "Enter how many pills you have now. Use 0 if none."; return; }
   record(editing ? `Edited ${name}` : `Added ${name} (${num(stock)} loose, ${num(disp)} in dispenser)`);
-  const data = { name, perDay, pack, stock, disp, dispAsOf: today };
-  if (editing) Object.assign(editing, data); else state.meds.push({ id: uid(), ...data });
-  save();
+  const data = { name, perDay, pack, stock, disp, dispAsOf: todayISO() };
+  if (editing) Object.assign(state.meds.find(m => m.id === editing.id), data);
+  else state.meds.push({ id: uid(), ...data });
+  $("dlgMed").close(); save(); toast(`Saved ${name}`);
 });
 
 // ---------- pharmacy pickup ----------
 $("btnPickup").onclick = () => {
   $("pDate").value = todayISO();
   $("pickupRows").innerHTML = state.meds.map(m => `
-    <div class="qty-row"><label for="pk_${m.id}" style="margin:0;color:var(--ink)">${esc(m.name)}</label>
+    <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}</label>
     <input id="pk_${m.id}" type="number" min="0" step="0.25" inputmode="decimal" value="${m.pack}"></div>`).join("");
   $("dlgPickup").showModal();
 };
 $("formPickup").addEventListener("submit", e => {
-  if (e.submitter && e.submitter.value !== "save") return;
-  const date = $("pDate").value || todayISO();
+  e.preventDefault();
   const got = state.meds.map(m => [m, Math.max(0, +$("pk_" + m.id).value || 0)]).filter(([, q]) => q > 0);
+  $("dlgPickup").close();
   if (!got.length) return;
-  record(`Pharmacy pickup: ${got.map(([m, q]) => `${num(q)} × ${m.name}`).join(", ")}`);
-  state.history[0].date = date;
+  record(`Pharmacy pickup: ${got.map(([m, q]) => `${num(q)} × ${m.name}`).join(", ")}`, { date: $("pDate").value || todayISO(), kind: "pickup" });
   got.forEach(([m, q]) => m.stock += q);
-  save();
+  save(); toast("Pickup saved");
 });
 
 // ---------- dispenser fill ----------
 function fillRows() {
   const days = Math.max(1, +$("fDays").value || 1);
-  let short = [];
+  const short = [];
   $("fillRows").innerHTML = state.meds.map(m => {
     const need = m.perDay * days;
     if (need > m.stock) short.push(m.name);
-    return `<div class="qty-row"><span>${esc(m.name)}</span><span style="text-align:right"><b>${num(need)}</b> <span class="muted">of ${num(m.stock)}</span></span></div>`;
+    return `<div class="qty-row"><span>${esc(m.name)}</span><span style="text-align:right"><b>${num(Math.min(need, m.stock))}</b> <span class="muted">of ${num(m.stock)}</span></span></div>`;
   }).join("");
-  $("fillErr").textContent = short.length ? `Not enough loose pills for: ${short.join(", ")}. The count will go to 0 — log a pickup first if you have more.` : "";
+  $("fillErr").textContent = short.length ? `Not enough loose pills for: ${short.join(", ")}. If you have more at home, log the pickup first.` : "";
 }
 $("btnFill").onclick = () => {
   $("fDate").value = todayISO();
@@ -362,19 +438,17 @@ $("btnFill").onclick = () => {
 };
 $("fDays").oninput = fillRows;
 $("formFill").addEventListener("submit", e => {
-  if (e.submitter && e.submitter.value !== "save") return;
+  e.preventDefault();
   const date = $("fDate").value || todayISO();
-  const days = Math.max(1, +$("fDays").value || state.settings.fillDays);
-  record(`Filled dispenser for ${days} days`);
-  Object.assign(state.history[0], { date, kind: "fill", days });
+  const days = Math.max(1, Math.round(+$("fDays").value) || state.settings.fillDays);
+  record(`Filled dispenser for ${days} days`, { date, kind: "fill", days });
   state.meds.forEach(m => {
     const moved = Math.min(m.stock, m.perDay * days);
-    // Any pills still left in the dispenser stay there alongside the new ones.
-    m.disp = moved + dispLeft(m, date);
-    m.stock -= moved;
+    m.disp = moved + dispLeft(m, date);   // pills still in the dispenser stay there
     m.dispAsOf = date;
+    m.stock -= moved;
   });
-  save();
+  $("dlgFill").close(); save(); toast("Dispenser fill saved");
 });
 
 // ---------- settings & backup ----------
@@ -385,25 +459,31 @@ setting("setLead", "leadDays", 0);
 setting("setCycle", "cycleDays", 1);
 setting("setFill", "fillDays", 1);
 
-$("btnExport").onclick = () => {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+$("btnExport").onclick = async () => {
+  const data = JSON.stringify(state, null, 2), filename = `pill-tracker-${todayISO()}.json`;
+  const dl = window.claude && window.claude.use ? await claude.use("downloads").catch(() => null) : null;
+  if (dl) {
+    try { const r = await dl.save({ filename, data }); if (r && r.status === "saved") toast("Backup saved"); }
+    catch (e) { /* declined or unavailable: nothing was saved */ }
+    return;
+  }
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = `pill-tracker-${todayISO()}.json`; a.click();
+  a.href = URL.createObjectURL(new Blob([data], { type: "application/json" })); a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 $("btnImport").onclick = () => $("fileImport").click();
 $("fileImport").onchange = async () => {
-  const f = $("fileImport").files[0]; if (!f) return;
-  try {
-    const s = JSON.parse(await f.text());
-    if (!Array.isArray(s.meds)) throw new Error();
-    if (!confirm("Replace everything here with this backup?")) return;
-    state = { ...blank(), ...s, settings: { ...blank().settings, ...s.settings } }; save();
-  } catch (e) { alert("That file isn't a Pill Tracker backup."); }
-  $("fileImport").value = "";
+  const f = $("fileImport").files[0]; $("fileImport").value = ""; if (!f) return;
+  let s;
+  try { s = JSON.parse(await f.text()); if (!Array.isArray(s.meds)) throw 0; }
+  catch (e) { toast("That file isn't a Pill Tracker backup."); return; }
+  if (!await ask("Replace everything here with this backup?", "Replace")) return;
+  state = normalize(s); save(); toast("Backup imported");
 };
 
 render();
+initCloud();
 </script>
+
 </body>
 </html>

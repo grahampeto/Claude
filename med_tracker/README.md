@@ -11,6 +11,8 @@ A single-file web app (`index.html`) for tracking chronic medication. It needs n
 - Keeps a history with **Undo**, plus JSON **export/import** for backups.
 
 ## Use it
+Online (private to you, saves to your Claude account): https://claude.ai/artifact/2VCXcG8F4FktqAB31ftaBp
+
 Open `index.html` in any browser. On a phone, host it (for example with GitHub Pages), then use "Add to Home Screen".
 
 Your data is saved in that browser's local storage on that one device. Export a backup from time to time.
