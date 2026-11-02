@@ -170,11 +170,7 @@ label.check input { width: 20px; height: 20px; }
       <h2>Schedule</h2>
       <div class="row">
         <div><label for="setFillWeeks">I fill my dispenser every … weeks</label><input id="setFillWeeks" type="number" min="1" max="8" inputmode="numeric"></div>
-        <div><label for="setCycle">I order every … days</label><input id="setCycle" type="number" min="1" inputmode="numeric"></div>
-      </div>
-      <div class="row">
-        <div><label for="setLead">Days for pills to arrive after ordering</label><input id="setLead" type="number" min="0" inputmode="numeric"></div>
-        <div></div>
+        <div><label for="setHorizon">At an appointment, order what runs out within … weeks</label><input id="setHorizon" type="number" min="1" max="26" inputmode="numeric"></div>
       </div>
     </section>
   </div>
@@ -323,7 +319,7 @@ window.addEventListener("hashchange", showTab);
 //   disp   = pills in the dispenser on dispAsOf; taken at perWeek/7 a day from then on
 //   active = false while paused (e.g. a strength not used at the current dose)
 //   carry  = part-pill owed (+) or ahead (−) for doses that don't divide into whole pills per fill
-function blank() { return { meds: [], history: [], settings: { leadDays: 4, cycleDays: 30, fillDays: 14, apptDate: "" } }; }
+function blank() { return { meds: [], history: [], settings: { horizonWeeks: 5, fillDays: 14, apptDate: "" } }; }
 function normalize(s) {
   const out = { ...blank(), ...s, settings: { ...blank().settings, ...(s && s.settings) } };
   out.meds = (out.meds || []).map(m => ({ active: true, carry: 0, ...m, perWeek: m.perWeek != null ? m.perWeek : (m.perDay || 1) * 7 }));
@@ -409,7 +405,6 @@ function dispLeft(m, today) {
 // Freeze the dispenser count at today before a dose or pause change, so past days use the old dose.
 function settle(m, today) { m.disp = dispLeft(m, today); m.dispAsOf = today; }
 function project(m, today) {
-  const { leadDays, cycleDays } = state.settings;
   const inDisp = dispLeft(m, today);
   let daysLeft, runOut;
   if (isMonthly(m)) {          // walk forward to the first dose day you can't cover
@@ -424,22 +419,14 @@ function project(m, today) {
     daysLeft = Math.floor((m.stock + inDisp) / rate(m) + 1e-9);
     runOut = addDays(today, daysLeft);
   }
-  let orderBy, level;
-  const appt = upcomingAppt(today);
-  if (appt) {
-    // You order at the appointment; pills can take leadDays to arrive. They must last until then,
-    // and anything that won't last until the following order arrives goes on this order.
-    const needBy = addDays(appt, leadDays);
-    level = diffDays(runOut, needBy) < 0 ? "bad" : diffDays(runOut, addDays(needBy, cycleDays)) < 0 ? "warn" : "ok";
-    orderBy = level === "bad" ? addDays(runOut, -leadDays) : appt;
-  } else {
-    orderBy = addDays(runOut, -leadDays);
-    const inN = diffDays(orderBy, today);
-    level = inN <= 0 ? "bad" : inN <= cycleDays ? "warn" : "ok";
-  }
-  const orderIn = diffDays(orderBy, today);
+  // You order at your appointment (or today, if no appointment is set). Anything that runs out
+  // within horizonWeeks after that date goes on that order; running out before it means order sooner.
+  const base = upcomingAppt(today) || today;
+  const horizon = addDays(base, state.settings.horizonWeeks * 7);
+  const level = diffDays(runOut, base) < 0 ? "now" : diffDays(runOut, horizon) < 0 ? "order" : "ok";
+  const orderIn = diffDays(runOut, today);   // sort key: soonest to run out first
   const need = fillAmount(m, today);
-  return { inDisp, daysLeft, runOut, orderBy, orderIn, level, need, short: m.stock < need };
+  return { inDisp, daysLeft, runOut, orderIn, level, need, short: m.stock < need };
 }
 function upcomingAppt(today) {
   const a = state.settings.apptDate;
@@ -451,19 +438,20 @@ function nextFillDate() {
 }
 
 // ---------- render ----------
-const LABEL = { bad: "Order now", warn: "Order this month", ok: "Stocked" };
-const LABEL_APPT = { bad: "Order before appointment", warn: "Order at appointment", ok: "Stocked" };
+const CHIP = { now: "bad", order: "bad", ok: "ok" };
+const LABEL_APPT = { now: "Order before appointment", order: "Order at appointment", ok: "Stocked" };
+const LABEL = { now: "Order now", order: "Order now", ok: "Stocked" };
 function render() {
   const today = todayISO();
   const projs = active().map(m => ({ m, p: project(m, today) })).sort((a, b) => a.p.orderIn - b.p.orderIn);
   const paused = byStatus("paused"), stopped = byStatus("stopped");
   const wk = weeks();
-  const appt = upcomingAppt(today), buf = state.settings.leadDays;
+  const appt = upcomingAppt(today), hw = state.settings.horizonWeeks;
   const labels = appt ? LABEL_APPT : LABEL;
   $("apptDate").value = state.settings.apptDate || "";
   $("apptHint").textContent = state.settings.apptDate && !appt
     ? `Your appointment on ${fmt(state.settings.apptDate)} has passed. Enter the next one.`
-    : `You order your pills at this appointment. The tracker allows ${buf} days for them to arrive.`;
+    : `You order at this appointment. Anything that runs out within ${hw} weeks after it is flagged red.`;
   $("apptHint").classList.toggle("short", !!(state.settings.apptDate && !appt));
 
   let html;
@@ -472,28 +460,25 @@ function render() {
   } else if (!projs.length) {
     html = `<div class="banner warn"><strong>No medications marked as taking</strong>On the Weekly doses tab, set the ones you're on now to “Taking”.</div>`;
   } else {
-    const due = projs.filter(x => x.p.level !== "ok");
-    const first = projs[0];
     const nf = nextFillDate();
     const fillLine = nf ? `<div class="sub">Next dispenser fill: ${fmt(nf)} (${rel(diffDays(nf, today))})</div>` : "";
-    const li = x => `<li>${esc(x.m.name)}</li>`;
+    const item = x => `<li>${esc(x.m.name)}: runs out ${fmt(x.p.runOut)}</li>`;
+    const now = projs.filter(x => x.p.level === "now"), order = projs.filter(x => x.p.level === "order");
+    const base = appt || today, horizon = addDays(base, hw * 7);
     if (appt) {
-      const urgent = due.filter(x => x.p.level === "bad"), atAppt = due.filter(x => x.p.level === "warn");
-      const apptLine = `your appointment on ${fmt(appt)} (${rel(diffDays(appt, today))})`;
-      if (urgent.length) {
-        html = `<div class="banner bad"><strong>Order before your appointment</strong>These run out before ${apptLine} plus ${buf} days for delivery:<ul>${urgent.map(x => `<li>${esc(x.m.name)}: runs out ${fmt(x.p.runOut)}</li>`).join("")}</ul>` +
-          (atAppt.length ? `<div class="sub">Also order at ${apptLine}:</div><ul>${atAppt.map(li).join("")}</ul>` : "") + fillLine + `</div>`;
-      } else if (atAppt.length) {
-        html = `<div class="banner warn"><strong>Next order: ${fmt(appt)} (${rel(diffDays(appt, today))})</strong>At your appointment, ask for:<ul>${atAppt.map(li).join("")}</ul>${fillLine}</div>`;
+      const when = `${fmt(appt)} (${rel(diffDays(appt, today))})`;
+      if (now.length) {
+        html = `<div class="banner bad"><strong>Order before your appointment</strong>These run out before your appointment on ${when}. Place a pharmacy order now:<ul>${now.map(item).join("")}</ul>` +
+          (order.length ? `<div class="sub">Then order these at your appointment:</div><ul>${order.map(item).join("")}</ul>` : "") + fillLine + `</div>`;
+      } else if (order.length) {
+        html = `<div class="banner bad"><strong>Order at your appointment: ${when}</strong>These run out before ${fmt(horizon)}, ${hw} weeks after the appointment:<ul>${order.map(item).join("")}</ul>${fillLine}</div>`;
       } else {
-        html = `<div class="banner ok"><strong>Next order: ${fmt(appt)} (${rel(diffDays(appt, today))})</strong>Nothing needed at this appointment. Everything lasts past the following order.${fillLine}</div>`;
+        html = `<div class="banner ok"><strong>Next appointment: ${when}</strong>Nothing to order. Everything lasts past ${fmt(horizon)}, ${hw} weeks after the appointment.${fillLine}</div>`;
       }
-    } else if (first.p.level === "bad") {
-      html = `<div class="banner bad"><strong>Order now</strong>Put these on your order:<ul>${due.map(x => `<li>${esc(x.m.name)}: runs out ${fmt(x.p.runOut)} (${rel(diffDays(x.p.runOut, today))})</li>`).join("")}</ul>${fillLine}</div>`;
+    } else if (now.length || order.length) {
+      html = `<div class="banner bad"><strong>Order now</strong>These run out within the next ${hw} weeks:<ul>${[...now, ...order].map(item).join("")}</ul><div class="sub">Add your next appointment date below to plan your order around it.</div>${fillLine}</div>`;
     } else {
-      html = `<div class="banner ${due.length ? "warn" : "ok"}"><strong>Next order by ${fmt(first.p.orderBy)} (${rel(first.p.orderIn)})</strong>` +
-        (due.length ? `Include on this month's order:<ul>${due.map(x => `<li>${esc(x.m.name)}: order by ${fmt(x.p.orderBy)}</li>`).join("")}</ul>`
-                    : `Everything is stocked for the next ${state.settings.cycleDays} days.`) + fillLine + `</div>`;
+      html = `<div class="banner ok"><strong>Nothing to order</strong>Everything lasts past ${fmt(horizon)}. Add your next appointment date below to plan your order around it.${fillLine}</div>`;
     }
   }
   $("banner").innerHTML = html;
@@ -503,7 +488,7 @@ function render() {
     <div class="med">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
-        <span><span class="chip ${p.level}">${labels[p.level]}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
+        <span><span class="chip ${CHIP[p.level]}">${labels[p.level]}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
       </div>
       <div class="muted">${dose(m)}</div>
       <div class="stats">
@@ -537,8 +522,7 @@ function render() {
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openMed(b.dataset.edit));
   $("btnPickup").disabled = !state.meds.length;
   $("btnFill").disabled = !projs.length;
-  $("setLead").value = state.settings.leadDays;
-  $("setCycle").value = state.settings.cycleDays;
+  $("setHorizon").value = state.settings.horizonWeeks;
   $("setFillWeeks").value = num(wk);
 }
 
@@ -751,8 +735,7 @@ $("apptDate").onchange = () => {
 function setting(id, key, min, scale = 1) {
   $(id).onchange = () => { const v = Math.round(+$(id).value); if (v >= min) { state.settings[key] = v * scale; draft = {}; save(); } else render(); };
 }
-setting("setLead", "leadDays", 0);
-setting("setCycle", "cycleDays", 1);
+setting("setHorizon", "horizonWeeks", 1);
 setting("setFillWeeks", "fillDays", 1, 7);
 
 $("btnExport").onclick = async () => {
