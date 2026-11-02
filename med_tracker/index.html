@@ -89,6 +89,11 @@ dialog form { padding: 18px; }
 .chip.paused { background: var(--line); color: var(--muted); }
 .med.paused .med-name { color: var(--muted); }
 .group-label { font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 16px 0 4px; }
+.group-label.first { margin-top: 0; }
+.group-label + .med { border-top: none; padding-top: 4px; }
+.appt-row { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 10px; align-items: center; }
+.appt-row label { margin: 0; color: var(--ink); font-weight: 700; font-size: 1rem; }
+select.status { padding: 4px 8px; font-size: .85rem; width: auto; border-radius: 8px; }
 label.check { display: flex; align-items: center; gap: 10px; color: var(--ink); margin-top: 14px; }
 label.check input { width: 20px; height: 20px; }
 #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -131,6 +136,13 @@ label.check input { width: 20px; height: 20px; }
   <!-- Overview -->
   <div class="view" id="view-overview">
     <div id="banner"></div>
+    <section class="card appt">
+      <div class="appt-row">
+        <label for="apptDate">Next doctor's appointment</label>
+        <input id="apptDate" type="date">
+      </div>
+      <p class="muted" id="apptHint" style="margin:6px 0 0"></p>
+    </section>
     <div class="actions">
       <button class="primary big" id="btnFill">Fill dispenser</button>
       <button class="primary big" id="btnPickup">Got pills from pharmacy</button>
@@ -145,7 +157,7 @@ label.check input { width: 20px; height: 20px; }
   <div class="view" id="view-doses" hidden>
     <section class="card">
       <div class="head"><h2>Weekly doses</h2><button class="link" id="btnAddMed">+ Add medication</button></div>
-      <p class="muted" style="margin:0 0 10px">How many pills of each you take per week. Change these after a checkup and tap Save. Untick “Taking” to pause one you're not on now. Its pills stay counted.</p>
+      <p class="muted" style="margin:0 0 10px">How many pills of each you take per week. Change these after a checkup and tap Save. Set one to Paused if it may come back at a later checkup, or Stopped if it won't. Its pills stay counted.</p>
       <div class="dose-row top"><span>Medication</span><span style="text-align:right">Per week</span><span style="text-align:right" id="perFillHead">Per fill</span></div>
       <div id="doseRows"></div>
       <div class="save-bar">
@@ -161,7 +173,7 @@ label.check input { width: 20px; height: 20px; }
         <div><label for="setCycle">I order every … days</label><input id="setCycle" type="number" min="1" inputmode="numeric"></div>
       </div>
       <div class="row">
-        <div><label for="setLead">Order this many days before running out</label><input id="setLead" type="number" min="0" inputmode="numeric"></div>
+        <div><label for="setLead">Days for pills to arrive after ordering</label><input id="setLead" type="number" min="0" inputmode="numeric"></div>
         <div></div>
       </div>
     </section>
@@ -311,7 +323,7 @@ window.addEventListener("hashchange", showTab);
 //   disp   = pills in the dispenser on dispAsOf; taken at perWeek/7 a day from then on
 //   active = false while paused (e.g. a strength not used at the current dose)
 //   carry  = part-pill owed (+) or ahead (−) for doses that don't divide into whole pills per fill
-function blank() { return { meds: [], history: [], settings: { leadDays: 7, cycleDays: 30, fillDays: 14 } }; }
+function blank() { return { meds: [], history: [], settings: { leadDays: 4, cycleDays: 30, fillDays: 14, apptDate: "" } }; }
 function normalize(s) {
   const out = { ...blank(), ...s, settings: { ...blank().settings, ...(s && s.settings) } };
   out.meds = (out.meds || []).map(m => ({ active: true, carry: 0, ...m, perWeek: m.perWeek != null ? m.perWeek : (m.perDay || 1) * 7 }));
@@ -341,6 +353,8 @@ function dosesBetween(m, a, b) {
   return c * m.perMonth;
 }
 const active = () => state.meds.filter(m => m.active);
+const statusOf = m => m.stopped ? "stopped" : m.active ? "taking" : "paused";
+const byStatus = st => state.meds.filter(m => statusOf(m) === st);
 const weeks = () => state.settings.fillDays / 7;
 const owed = m => (m.carry || 0) + m.perWeek * weeks();
 // Monthly doses: whatever falls in this fill's window, less what is already in the dispenser.
@@ -410,11 +424,26 @@ function project(m, today) {
     daysLeft = Math.floor((m.stock + inDisp) / rate(m) + 1e-9);
     runOut = addDays(today, daysLeft);
   }
-  const orderBy = addDays(runOut, -leadDays);
+  let orderBy, level;
+  const appt = upcomingAppt(today);
+  if (appt) {
+    // You order at the appointment; pills can take leadDays to arrive. They must last until then,
+    // and anything that won't last until the following order arrives goes on this order.
+    const needBy = addDays(appt, leadDays);
+    level = diffDays(runOut, needBy) < 0 ? "bad" : diffDays(runOut, addDays(needBy, cycleDays)) < 0 ? "warn" : "ok";
+    orderBy = level === "bad" ? addDays(runOut, -leadDays) : appt;
+  } else {
+    orderBy = addDays(runOut, -leadDays);
+    const inN = diffDays(orderBy, today);
+    level = inN <= 0 ? "bad" : inN <= cycleDays ? "warn" : "ok";
+  }
   const orderIn = diffDays(orderBy, today);
-  const level = orderIn <= 0 ? "bad" : orderIn <= cycleDays ? "warn" : "ok";
   const need = fillAmount(m, today);
   return { inDisp, daysLeft, runOut, orderBy, orderIn, level, need, short: m.stock < need };
+}
+function upcomingAppt(today) {
+  const a = state.settings.apptDate;
+  return a && diffDays(a, today) >= 0 ? a : null;
 }
 function nextFillDate() {
   const f = state.history.find(h => h.kind === "fill" && h.days);
@@ -423,23 +452,43 @@ function nextFillDate() {
 
 // ---------- render ----------
 const LABEL = { bad: "Order now", warn: "Order this month", ok: "Stocked" };
+const LABEL_APPT = { bad: "Order before appointment", warn: "Order at appointment", ok: "Stocked" };
 function render() {
   const today = todayISO();
   const projs = active().map(m => ({ m, p: project(m, today) })).sort((a, b) => a.p.orderIn - b.p.orderIn);
-  const paused = state.meds.filter(m => !m.active);
+  const paused = byStatus("paused"), stopped = byStatus("stopped");
   const wk = weeks();
+  const appt = upcomingAppt(today), buf = state.settings.leadDays;
+  const labels = appt ? LABEL_APPT : LABEL;
+  $("apptDate").value = state.settings.apptDate || "";
+  $("apptHint").textContent = state.settings.apptDate && !appt
+    ? `Your appointment on ${fmt(state.settings.apptDate)} has passed. Enter the next one.`
+    : `You order your pills at this appointment. The tracker allows ${buf} days for them to arrive.`;
+  $("apptHint").classList.toggle("short", !!(state.settings.apptDate && !appt));
 
   let html;
   if (!state.meds.length) {
     html = `<div class="banner warn"><strong>Add your medications to start</strong>Go to Weekly doses and tap “+ Add medication”. Enter how many pills you have right now and the tracker works out when to order.</div>`;
   } else if (!projs.length) {
-    html = `<div class="banner warn"><strong>All medications are paused</strong>In Weekly doses, tick “Taking” for the ones you're on now.</div>`;
+    html = `<div class="banner warn"><strong>No medications marked as taking</strong>On the Weekly doses tab, set the ones you're on now to “Taking”.</div>`;
   } else {
     const due = projs.filter(x => x.p.level !== "ok");
     const first = projs[0];
     const nf = nextFillDate();
     const fillLine = nf ? `<div class="sub">Next dispenser fill: ${fmt(nf)} (${rel(diffDays(nf, today))})</div>` : "";
-    if (first.p.level === "bad") {
+    const li = x => `<li>${esc(x.m.name)}</li>`;
+    if (appt) {
+      const urgent = due.filter(x => x.p.level === "bad"), atAppt = due.filter(x => x.p.level === "warn");
+      const apptLine = `your appointment on ${fmt(appt)} (${rel(diffDays(appt, today))})`;
+      if (urgent.length) {
+        html = `<div class="banner bad"><strong>Order before your appointment</strong>These run out before ${apptLine} plus ${buf} days for delivery:<ul>${urgent.map(x => `<li>${esc(x.m.name)}: runs out ${fmt(x.p.runOut)}</li>`).join("")}</ul>` +
+          (atAppt.length ? `<div class="sub">Also order at ${apptLine}:</div><ul>${atAppt.map(li).join("")}</ul>` : "") + fillLine + `</div>`;
+      } else if (atAppt.length) {
+        html = `<div class="banner warn"><strong>Next order: ${fmt(appt)} (${rel(diffDays(appt, today))})</strong>At your appointment, ask for:<ul>${atAppt.map(li).join("")}</ul>${fillLine}</div>`;
+      } else {
+        html = `<div class="banner ok"><strong>Next order: ${fmt(appt)} (${rel(diffDays(appt, today))})</strong>Nothing needed at this appointment. Everything lasts past the following order.${fillLine}</div>`;
+      }
+    } else if (first.p.level === "bad") {
       html = `<div class="banner bad"><strong>Order now</strong>Put these on your order:<ul>${due.map(x => `<li>${esc(x.m.name)}: runs out ${fmt(x.p.runOut)} (${rel(diffDays(x.p.runOut, today))})</li>`).join("")}</ul>${fillLine}</div>`;
     } else {
       html = `<div class="banner ${due.length ? "warn" : "ok"}"><strong>Next order by ${fmt(first.p.orderBy)} (${rel(first.p.orderIn)})</strong>` +
@@ -450,13 +499,13 @@ function render() {
   $("banner").innerHTML = html;
   $("btnFill").textContent = `Fill dispenser (${num(wk)} week${wk === 1 ? "" : "s"})`;
 
-  const activeHtml = projs.map(({ m, p }) => `
+  const activeHtml = `<div class="group-label first">Taking now</div>` + projs.map(({ m, p }) => `
     <div class="med">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
-        <span><span class="chip ${p.level}">${LABEL[p.level]}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
+        <span><span class="chip ${p.level}">${labels[p.level]}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
       </div>
-      <div class="muted">${dose(m)} · usually ${num(m.pack)} per pickup</div>
+      <div class="muted">${dose(m)}</div>
       <div class="stats">
         <div class="stat"><b>${pills(m.stock)}</b><span>loose at home</span></div>
         <div class="stat"><b>${pills(p.inDisp)}</b><span>in dispenser</span></div>
@@ -464,16 +513,18 @@ function render() {
       </div>
       ${p.short ? `<div class="short">Not enough loose pills for the next fill (needs ${p.need}).</div>` : ""}
     </div>`).join("");
-  const pausedHtml = paused.map(m => `
+  const offHtml = (list, chip) => list.map(m => `
     <div class="med paused">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
-        <span><span class="chip paused">Paused</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
+        <span><span class="chip paused">${chip}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
       </div>
       <div class="muted">${pills(m.stock)} loose at home</div>
     </div>`).join("");
   $("meds").innerHTML = state.meds.length
-    ? activeHtml + (paused.length ? `<div class="group-label">Paused</div>` + pausedHtml : "")
+    ? (projs.length ? activeHtml : "") +
+      (paused.length ? `<div class="group-label">Paused</div>` + offHtml(paused, "Paused") : "") +
+      (stopped.length ? `<div class="group-label">Stopped</div>` + offHtml(stopped, "Stopped") : "")
     : `<p class="muted">No medications yet.</p>`;
 
   if (!Object.keys(draft).length) renderDoses();
@@ -509,16 +560,16 @@ function perFillText(pw, active, m) {
 }
 function renderDoses() {
   $("perFillHead").textContent = `Per ${num(weeks())}-wk fill`;
-  const list = [...active(), ...state.meds.filter(m => !m.active)];
+  const list = [...byStatus("taking"), ...byStatus("paused"), ...byStatus("stopped")];
   $("doseRows").innerHTML = list.length ? list.map(m => {
     const d = draft[m.id] || {};
     const pw = d.perWeek != null ? d.perWeek : amountOf(m);
-    const on = d.active != null ? d.active : m.active;
+    const st = d.status || statusOf(m), on = st === "taking";
     const changed = draft[m.id] ? " changed" : "";
     return `<div class="dose-row${on ? "" : " off"}${changed}" data-id="${m.id}">
       <div class="dose-name"><b>${esc(m.name)}</b>
         ${isMonthly(m) ? `<span class="muted" style="font-size:.8rem">Monthly, on the ${ordinal(m.monthDay)}. Number is per month.</span>` : ""}
-        <label class="check" for="da_${m.id}"><input type="checkbox" id="da_${m.id}" ${on ? "checked" : ""}> Taking</label></div>
+        <select class="status" id="ds_${m.id}" aria-label="${esc(m.name)} status">${["taking", "paused", "stopped"].map(x => `<option value="${x}" ${x === st ? "selected" : ""}>${x[0].toUpperCase() + x.slice(1)}</option>`).join("")}</select></div>
       <input type="number" id="dw_${m.id}" min="0.05" step="any" inputmode="decimal" value="${num(pw)}" aria-label="${esc(m.name)} pills ${unitOf(m)}">
       <span class="per-fill" id="dp_${m.id}">${perFillText(pw, on, m)}</span>
     </div>`;
@@ -531,34 +582,37 @@ function updateDoseBar() {
   $("btnDoseReset").hidden = !n;
   $("doseStatus").textContent = n ? `${n} unsaved change${n === 1 ? "" : "s"}` : "";
 }
-$("doseRows").addEventListener("input", e => {
-  const row = e.target.closest(".dose-row"); if (!row) return;
+// Number boxes fire "input" as you type; the status menu fires "change".
+["input", "change"].forEach(t => $("doseRows").addEventListener(t, e => onDoseRow(e.target.closest(".dose-row"))));
+function onDoseRow(row) {
+  if (!row) return;
   const m = state.meds.find(x => x.id === row.dataset.id);
-  const pw = +$("dw_" + m.id).value, on = $("da_" + m.id).checked;
-  if (pw === amountOf(m) && on === m.active) delete draft[m.id];
-  else draft[m.id] = { perWeek: pw, active: on };
+  const pw = +$("dw_" + m.id).value, st = $("ds_" + m.id).value, on = st === "taking";
+  if (pw === amountOf(m) && st === statusOf(m)) delete draft[m.id];
+  else draft[m.id] = { perWeek: pw, status: st };
   row.classList.toggle("changed", !!draft[m.id]);
   row.classList.toggle("off", !on);
   $("dp_" + m.id).textContent = pw > 0 ? perFillText(pw, on, m) : "–";
   updateDoseBar();
-});
+}
 $("btnDoseReset").onclick = () => { draft = {}; renderDoses(); };
 $("btnDoseSave").onclick = () => {
   const today = todayISO();
   const bad = Object.entries(draft).filter(([, d]) => !(d.perWeek > 0));
-  if (bad.length) { $("doseStatus").textContent = "Pills per week must be more than 0. To stop one for now, untick Taking."; return; }
+  if (bad.length) { $("doseStatus").textContent = "Pills per week must be more than 0. To stop one, set it to Paused or Stopped."; return; }
   const notes = [];
   const changes = Object.entries(draft).map(([id, d]) => [state.meds.find(m => m.id === id), d]);
   changes.forEach(([m, d]) => {
-    if (m.active && !d.active) notes.push(`paused ${m.name}`);
-    else if (!m.active && d.active) notes.push(`resumed ${m.name} at ${num(d.perWeek)} ${unitOf(m)}`);
+    const was = statusOf(m), now = d.status;
+    if (was !== now && now !== "taking") notes.push(`${now} ${m.name}`);
+    else if (was !== now) notes.push(`resumed ${m.name} at ${num(d.perWeek)} ${unitOf(m)}`);
     else notes.push(`${m.name} ${num(amountOf(m))} → ${num(d.perWeek)} ${unitOf(m)}`);
   });
   record(`Dose change: ${notes.join("; ")}`, { kind: "dose" });
   changes.forEach(([m, d]) => {
     settle(m, today);
-    if (m.active && !d.active) { m.stock += m.disp; m.disp = 0; }   // pills come out of the dispenser
-    m.active = d.active; m.carry = 0;
+    if (m.active && d.status !== "taking") { m.stock += m.disp; m.disp = 0; }   // pills come out of the dispenser
+    m.active = d.status === "taking"; m.stopped = d.status === "stopped"; m.carry = 0;
     if (isMonthly(m)) m.perMonth = d.perWeek; else m.perWeek = d.perWeek;
   });
   draft = {}; save(); toast("Doses saved");
@@ -627,9 +681,9 @@ $("btnPickup").onclick = () => {
   const row = m => `
     <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}<span class="note">usually ${num(m.pack)}</span></label>
     <input id="pk_${m.id}" type="number" min="0" step="any" inputmode="numeric" placeholder="0"></div>`;
-  const paused = state.meds.filter(m => !m.active);
+  const off = [...byStatus("paused"), ...byStatus("stopped")];
   $("pickupRows").innerHTML = active().map(row).join("") +
-    (paused.length ? `<div class="group-label">Paused</div>` + paused.map(row).join("") : "");
+    (off.length ? `<div class="group-label">Paused or stopped</div>` + off.map(row).join("") : "");
   $("dlgPickup").showModal();
   const first = document.querySelector("#pickupRows input"); if (first) first.focus();
 };
@@ -683,6 +737,15 @@ $("formFill").addEventListener("submit", e => {
   });
   $("dlgFill").close(); save(); toast("Removed from stock");
 });
+
+// ---------- appointment ----------
+$("apptDate").onchange = () => {
+  const v = $("apptDate").value;
+  if (v === (state.settings.apptDate || "")) return;
+  state.settings.apptDate = v;
+  if (v) record(`Next appointment set to ${fmt(v)}`, { kind: "note" });
+  save(); toast(v ? "Appointment saved" : "Appointment cleared");
+};
 
 // ---------- settings & backup ----------
 function setting(id, key, min, scale = 1) {
