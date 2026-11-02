@@ -54,6 +54,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .notif.ok { border-left-color: #3fbf7f; }
 .notif.note { border-left-color: #f5c84c; }
 .notif.pink { border-left-color: #e86fa8; }
+.notif.todo { border-left-color: #f5a623; }
 .notif .x { font-size: 26px; color: #8a94a6; padding: 6px 10px; }
 .empty-notif { text-align: center; padding: 40px 0; color: #8a94a6; font-size: 20px; }
 
@@ -132,7 +133,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .row .text { font-size: 20px; padding: 0 12px; word-wrap: break-word; }
 .row.done .text { text-decoration: line-through; color: #6b7487; }
 .row .meta { font-size: 14px; color: #8a94a6; margin-top: 3px; text-decoration: none; }
-.row .del { color: #6b7487; font-size: 24px; padding: 4px 8px; }
+.row .del, .ev .del { color: #6b7487; font-size: 24px; padding: 4px 8px; }
 .check {
   width: 36px; height: 36px; border-radius: 18px; border: 3px solid #4a556c;
   -webkit-flex-shrink: 0; flex-shrink: 0; text-align: center; line-height: 30px; font-size: 20px; color: #fff;
@@ -259,3 +260,14 @@ select.field { height: 50px; }
   .cal-nav h3 { font-size: 18px; }
   .cal-nav .btn { padding: 8px 12px; font-size: 16px; }
 }
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 28px; z-index: 45; width: 520px; max-width: 92%; margin-left: -260px;
+  background: #2a3346; border-radius: 14px; padding: 12px 14px 12px 18px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  display: -webkit-box; display: -webkit-flex; display: flex;
+  -webkit-box-align: center; -webkit-align-items: center; align-items: center;
+  -webkit-box-pack: justify; -webkit-justify-content: space-between; justify-content: space-between;
+}
+.toast .btn { background: #4f8cff; color: #fff; margin-left: 12px; }
+@media (max-width: 600px) { .toast { left: 4%; margin-left: 0; bottom: 16px; } }

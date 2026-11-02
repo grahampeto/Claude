@@ -1,17 +1,19 @@
-# go2rtc (https://github.com/AlexxIT/go2rtc) turns the cameras into streams an
-# old iPad can show (MJPEG in an <img>, or HLS in a <video>).
-# Run it on any always-on machine at home (Pi, NAS, PC, Home Assistant add-on).
-# Web UI on port 1984.
+# go2rtc (https://github.com/AlexxIT/go2rtc) – collects the camera video so
+# House Hub can show it. Run it on any always-on machine at home (Pi, NAS, PC,
+# Home Assistant add-on). Web page: http://<this-machine>:1984
+# Full walkthrough: house_hub/README.md → "Cameras".
 
 streams:
-  # Ring doorbell – go2rtc has a built-in Ring source. Get the refresh token
-  # from the go2rtc web UI: Add → Ring → log in (2FA supported).
+  # Ring doorbell – in the go2rtc page: Add → Ring → log in (2FA supported),
+  # then paste the line it gives you here.
   ring_doorbell: ring:?device_id=YOUR_DEVICE_ID&refresh_token=YOUR_REFRESH_TOKEN
 
-  # LSC Smart Connect (Action) camera. Many models expose RTSP/ONVIF once it is
-  # enabled (some need the "onvif" option in the app or custom firmware such as
-  # OpenIPC / thingino). Typical URL:
-  garage: rtsp://admin:PASSWORD@192.168.1.50:554/stream1
+  # LSC Smart Connect (Action) camera – use the RTSP address found via
+  # Add → ONVIF, or the camera's RTSP URL if your model has one.
+  garage: rtsp://admin:PASSWORD@192.168.1.50:554/
 
 api:
   listen: ":1984"
+  # Serve House Hub itself from this box (plain http, so camera streams work).
+  # Set this AFTER logging in to Ring above – it replaces go2rtc's own pages.
+  # static_dir: "/config/house-hub/house_hub/public"

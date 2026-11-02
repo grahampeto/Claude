@@ -65,19 +65,19 @@
   // sync is set up, mirrored to a Firebase Realtime Database through its REST
   // API (plain XHR + EventSource, so it works on old iOS). Each top-level key
   // is written on its own so two devices editing different lists never clash.
-  var STATE_KEYS = ['events', 'groceries', 'todos', 'notes', 'checklists', 'settings'];
+  var STATE_KEYS = ['events', 'groceries', 'meals', 'todos', 'notes', 'checklists', 'settings'];
 
   function items(list) { return list.map(function (t, i) { return { id: 'd' + i, text: t }; }); }
   function defaults() {
     return {
-      events: [], todos: [], notes: [],
+      events: [], todos: [], notes: [], meals: [],
       groceries: { items: [], history: [] },
       checklists: {
         jess: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
         graham: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
         both: { items: items(['Unload dishwasher', 'Put bins out (if bin day)', 'Lock up & alarm on']), done: {} }
       },
-      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '' }
+      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '', google: { url: '', token: '' } }
     };
   }
   // Firebase drops empty arrays/objects and may hand arrays back as objects,
@@ -90,6 +90,7 @@
   function normalize(key, v) {
     var d = defaults()[key];
     if (key === 'events' || key === 'todos' || key === 'notes') return arr(v);
+    if (key === 'meals') return arr(v).map(function (m) { m.ingredients = arr(m.ingredients); return m; });
     if (key === 'groceries') {
       v = v || {};
       if (Object.prototype.toString.call(v) === '[object Array]') v = { items: v };
@@ -98,7 +99,7 @@
         // Old format: { name: count }
         hist = Object.keys(hist).map(function (n) { return { name: n, count: v.history[n] }; });
       }
-      return { items: arr(v.items), history: arr(hist) };
+      return { items: arr(v.items).filter(function (i) { return !i.done; }), history: arr(hist) };
     }
     if (key === 'checklists') {
       v = v || d;
@@ -114,7 +115,11 @@
     }
     if (key === 'settings') {
       v = v || {};
-      return { title: v.title || d.title, calendars: arr(v.calendars), cameras: arr(v.cameras), corsProxy: v.corsProxy || '' };
+      var g = v.google || {};
+      return {
+        title: v.title || d.title, calendars: arr(v.calendars), cameras: arr(v.cameras), corsProxy: v.corsProxy || '',
+        google: { url: (g.url || '').replace(/\/+$/, ''), token: g.token || '' }
+      };
     }
     return v;
   }
@@ -131,6 +136,7 @@
     pollTimer: null,
     listeners: [],
     calendar: { events: [], errors: [] },
+    google: { calendars: [], events: [], errors: [], status: 'off' },
 
     init: function () {
       var cached = lsGet('househub.state', null) || {};
@@ -141,11 +147,15 @@
       }
       this.dirty = lsGet('househub.dirty', {});
       this.sync = lsGet('househub.sync', null);
+      var gc = lsGet('househub.google', null);
+      if (gc) { this.google = gc; this.google.status = 'cached'; }
       this.connect();
       var self = this;
+      this.pullGoogle();
       setInterval(function () { self.flush(); }, 15000);
       this.pullCalendar();
       setInterval(function () { self.pullCalendar(); }, 10 * 60000);
+      setInterval(function () { self.pullGoogle(); }, 5 * 60000);
     },
     onChange: function (fn) { this.listeners.push(fn); },
     emit: function () { for (var i = 0; i < this.listeners.length; i++) this.listeners[i](); },
@@ -218,7 +228,7 @@
       }
       this.cache();
       if (first) this.flush();
-      if (touched.indexOf('settings') >= 0) this.pullCalendar();
+      if (touched.indexOf('settings') >= 0) { this.pullCalendar(); this.pullGoogle(); }
       this.emit();
     },
 
@@ -228,7 +238,7 @@
       this.cache();
       this.emit();
       this.flush();
-      if (key === 'settings') this.pullCalendar();
+      if (key === 'settings') { this.pullCalendar(); this.pullGoogle(); }
     },
     flush: function () {
       var self = this, base = this.baseUrl();
@@ -254,6 +264,8 @@
     pullCalendar: function () {
       var self = this, s = this.data.settings;
       var feeds = s.calendars.filter(function (c) { return c.url; });
+      // The House Hub worker doubles as the CORS proxy.
+      var proxy = s.corsProxy || (s.google.url ? s.google.url + '/?url=' : '');
       if (!feeds.length) { this.calendar = { events: [], errors: [] }; return; }
       var now = new Date();
       var from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -261,7 +273,7 @@
       var all = [], errors = [], pending = feeds.length;
       feeds.forEach(function (feed) {
         var u = feed.url.trim().replace(/^webcal:/i, 'https:');
-        if (s.corsProxy) u = s.corsProxy.indexOf('{url}') >= 0 ? s.corsProxy.replace('{url}', encodeURIComponent(u)) : s.corsProxy + encodeURIComponent(u);
+        if (proxy) u = proxy.indexOf('{url}') >= 0 ? proxy.replace('{url}', encodeURIComponent(u)) : proxy + encodeURIComponent(u);
         var x = new XMLHttpRequest();
         x.open('GET', u, true);
         x.timeout = 20000;
@@ -281,6 +293,40 @@
           if (--pending === 0) { self.calendar = { events: all, errors: errors }; self.emit(); }
         };
         x.send(null);
+      });
+    },
+
+    // Two-way Google Calendar sync through the House Hub Cloudflare Worker.
+    googleOn: function () { var g = this.data.settings.google; return !!(g.url && g.token); },
+    googleCall: function (method, path, body, cb) {
+      var g = this.data.settings.google;
+      var x = new XMLHttpRequest();
+      x.open(method, g.url + path, true);
+      x.timeout = 20000;
+      x.setRequestHeader('Authorization', 'Bearer ' + g.token);
+      if (body) x.setRequestHeader('Content-Type', 'application/json');
+      x.onreadystatechange = function () {
+        if (x.readyState !== 4) return;
+        var data = null;
+        try { data = JSON.parse(x.responseText); } catch (e) { /* ignore */ }
+        if (x.status >= 200 && x.status < 300) cb(null, data);
+        else cb(new Error(data && data.error ? data.error : x.status === 0 ? 'can\u2019t reach the worker' : 'HTTP ' + x.status));
+      };
+      x.send(body ? JSON.stringify(body) : null);
+    },
+    pullGoogle: function () {
+      var self = this;
+      if (!this.googleOn()) { this.google = { calendars: [], events: [], errors: [], status: 'off' }; return; }
+      var now = new Date();
+      var from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      var to = new Date(now.getFullYear(), now.getMonth() + 6, 1);
+      this.googleCall('GET', '/google/events?from=' + encodeURIComponent(from.toISOString()) + '&to=' + encodeURIComponent(to.toISOString()), null, function (err, res) {
+        if (err) { self.google.status = 'error'; self.google.errors = [err.message]; }
+        else {
+          self.google = { calendars: res.calendars || [], events: res.events || [], errors: res.errors || [], status: 'ok' };
+          lsSet('househub.google', self.google);
+        }
+        self.emit();
       });
     }
   };
@@ -332,6 +378,32 @@
   var Apps = {};
 
   // ---- Calendar -------------------------------------------------------------
+  // Parse "2026-11-05", "2026-11-05T09:30:00Z" or "...+01:00" without relying
+  // on old Safari's Date parser.
+  function parseISO(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/.exec(v || '');
+    if (!m) return new Date(v);
+    if (!m[4]) return new Date(+m[1], +m[2] - 1, +m[3]);
+    if (!m[7]) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+    var off = 0;
+    if (m[7] !== 'Z') { var t = m[7].replace(':', ''); off = (t[0] === '-' ? -1 : 1) * (+t.slice(1, 3) * 60 + +t.slice(3, 5)); }
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) - off * 60000);
+  }
+  // Local date + time -> "2026-11-05T19:00:00+00:00" for Google.
+  function isoLocal(dateKey, time) {
+    var d = parseDay(dateKey), t = time.split(':');
+    d.setHours(+t[0], +t[1]);
+    var off = -d.getTimezoneOffset(), sign = off >= 0 ? '+' : '-';
+    off = Math.abs(off);
+    return dateKey + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':00' + sign + pad(Math.floor(off / 60)) + ':' + pad(off % 60);
+  }
+  var GCAL_COLORS = ['#4f8cff', '#f5a623', '#7b61ff', '#3fbf7f', '#e86fa8'];
+  function googleCalColor(id) {
+    var cals = Store.google.calendars;
+    for (var i = 0; i < cals.length; i++) if (cals[i].id === id) return GCAL_COLORS[i % GCAL_COLORS.length];
+    return GCAL_COLORS[0];
+  }
+
   function allEvents() {
     var out = [];
     Store.data.events.forEach(function (e) {
@@ -342,6 +414,15 @@
     (Store.calendar.events || []).forEach(function (e) {
       out.push({ title: e.title, location: e.location, allDay: e.allDay, start: new Date(e.start), end: new Date(e.end), color: e.color, calendar: e.calendar });
     });
+    if (Store.googleOn()) {
+      Store.google.events.forEach(function (e) {
+        out.push({
+          id: e.id, gcal: e.calendarId, title: e.title, location: e.location, allDay: e.allDay, who: e.who,
+          start: parseISO(e.start), end: parseISO(e.end), calendar: e.calendar,
+          color: e.who ? '' : googleCalColor(e.calendarId)
+        });
+      });
+    }
     out.sort(function (a, b) { return a.start - b.start; });
     return out;
   }
@@ -390,9 +471,9 @@
         if (addDays(start, (w + 1) * 7).getMonth() !== m.getMonth() && w >= 3) break;
       }
       h += '</div>';
-      if (Store.calendar.errors && Store.calendar.errors.length) {
-        h += '<p class="small overdue">Calendar feed problem: ' + esc(Store.calendar.errors.join('; ')) + '</p>';
-      }
+      var problems = (Store.calendar.errors || []).concat(Store.googleOn() ? Store.google.errors : []);
+      if (problems.length) h += '<p class="small overdue">Calendar problem: ' + esc(problems.join('; ')) + '</p>';
+      if (Store.googleOn() && Store.google.status === 'ok') h += '<p class="small muted">✓ Synced with Google Calendar</p>';
       $('cal-month').innerHTML = h;
 
       var sel = parseDay(this.selected), dayEvs = eventsOn(events, sel);
@@ -404,7 +485,7 @@
           (e.calendar ? ' · ' + esc(e.calendar) : '') + '</div>' +
           '<div class="n">' + (e.who ? whoTag(e.who) : '') + esc(e.title) + '</div>' +
           (e.location ? '<div class="t">' + esc(e.location) + '</div>' : '') + '</div>' +
-          (e.local ? '<button class="del" data-action="cal-del" data-id="' + e.id + '" style="font-size:24px;color:#6b7487;padding:4px 8px">✕</button>' : '') +
+          (e.local || e.gcal ? '<button class="del" data-action="cal-del" data-id="' + esc(e.id) + '"' + (e.gcal ? ' data-gcal="' + esc(e.gcal) + '"' : '') + '>✕</button>' : '') +
           '</div>';
       });
       $('cal-day').innerHTML = dh;
@@ -415,92 +496,216 @@
       'cal-today': function () { Apps.calendar.enter(); },
       'cal-select': function (el) { Apps.calendar.selected = el.getAttribute('data-day'); },
       'cal-del': function (el) {
-        if (!confirm('Delete this event?')) return;
-        var id = el.getAttribute('data-id');
+        var id = el.getAttribute('data-id'), gcal = el.getAttribute('data-gcal');
+        if (!confirm(gcal ? 'Delete this event from Google Calendar?' : 'Delete this event?')) return;
+        if (gcal) {
+          Store.google.events = Store.google.events.filter(function (e) { return e.id !== id; });
+          Store.googleCall('DELETE', '/google/events/' + encodeURIComponent(gcal) + '/' + encodeURIComponent(id), null, function (err) {
+            if (err) alert('Couldn\u2019t delete from Google: ' + err.message);
+            Store.pullGoogle();
+          });
+          return;
+        }
         Store.data.events = Store.data.events.filter(function (e) { return e.id !== id; });
         Store.save('events');
       },
       'cal-add': function () {
-        Modal.open('New event',
+        var google = Store.googleOn() && Store.google.calendars.length;
+        var calPicker = google && Store.google.calendars.length > 1
+          ? '<label class="lbl">Google calendar</label>' + segHtml('cal', Store.google.calendars.map(function (c) { return [c.id, c.name]; }), Store.google.calendars[0].id)
+          : '';
+        Modal.open(google ? 'New event (saved to Google Calendar)' : 'New event',
           '<input class="field" name="title" placeholder="What?">' +
-          '<div class="flex"><div class="grow" style="margin-right:10px"><label class="lbl">Date</label><input class="field" type="date" name="date" value="' + Apps.calendar.selected + '"></div>' +
-          '<div class="grow"><label class="lbl">Time (blank = all day)</label><input class="field" type="time" name="time"></div></div>' +
-          '<label class="lbl">Who</label>' + segHtml('who', WHO_OPTS, 'both'),
+          '<label class="lbl">Date</label><input class="field" type="date" name="date" value="' + Apps.calendar.selected + '">' +
+          '<div class="flex"><div class="grow" style="margin-right:10px"><label class="lbl">Start (blank = all day)</label><input class="field" type="time" name="time"></div>' +
+          '<div class="grow"><label class="lbl">End (optional)</label><input class="field" type="time" name="end"></div></div>' +
+          '<label class="lbl">Who</label>' + segHtml('who', WHO_OPTS, 'both') + calPicker,
           function () {
-            var title = Modal.val('title'), date = Modal.val('date');
+            var title = Modal.val('title'), date = Modal.val('date'), time = Modal.val('time'), end = Modal.val('end'), who = Modal.seg('who');
             if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-            Store.data.events.push({ id: uid(), title: title, date: date, time: Modal.val('time'), who: Modal.seg('who') });
-            Store.save('events');
+            function saveLocal() {
+              Store.data.events.push({ id: uid(), title: title, date: date, time: time, who: who });
+              Store.save('events');
+            }
+            if (!google) return saveLocal();
+            var body = { title: title, who: who, calendarId: Modal.seg('cal') || Store.google.calendars[0].id };
+            if (time) {
+              body.allDay = false;
+              body.start = isoLocal(date, time);
+              if (!end || end <= time) { var t = time.split(':'); end = pad(Math.min(23, +t[0] + 1)) + ':' + (+t[0] >= 23 ? '59' : t[1]); }
+              body.end = isoLocal(date, end);
+            } else {
+              body.allDay = true; body.start = date; body.end = dayKey(addDays(parseDay(date), 1));
+            }
+            // Show it straight away; replaced by the real event on the next refresh.
+            var cal = Store.google.calendars.filter(function (c) { return c.id === body.calendarId; })[0];
+            Store.google.events.push({ id: 'pending-' + uid(), calendarId: body.calendarId, calendar: cal ? cal.name : '', title: title, location: '', allDay: body.allDay, start: body.start, end: body.end, who: who });
+            Store.googleCall('POST', '/google/events', body, function (err) {
+              if (err) {
+                alert('Couldn\u2019t save to Google (' + err.message + '). Saved in House Hub instead.');
+                saveLocal();
+              }
+              Store.pullGoogle();
+            });
           });
       }
     }
   };
 
   // ---- Groceries ------------------------------------------------------------
+  // Ticking an item removes it (with a few seconds to undo). Meals are saved
+  // ingredient lists; adding a meal puts its ingredients on the list.
   function groc() { return Store.data.groceries; }
+  function bumpHistory(name) {
+    var g = groc();
+    for (var j = 0; j < g.history.length; j++) {
+      if (g.history[j].name.toLowerCase() === name.toLowerCase()) { g.history[j].count++; return; }
+    }
+    g.history.push({ name: name, count: 1 });
+  }
+  function onList(name) {
+    var items = groc().items;
+    for (var i = 0; i < items.length; i++) if (items[i].name.toLowerCase() === name.toLowerCase()) return true;
+    return false;
+  }
+  function findMeal(id) { var m = Store.data.meals; for (var i = 0; i < m.length; i++) if (m[i].id === id) return m[i]; return null; }
+
+  var Toast = {
+    timer: null,
+    show: function (text, undoFn) {
+      var el = $('toast');
+      if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
+      el.innerHTML = '<span>' + esc(text) + '</span>' + (undoFn ? '<button class="btn small" data-action="toast-undo">Undo</button>' : '');
+      el.className = 'toast';
+      this.undo = undoFn;
+      clearTimeout(this.timer);
+      var self = this;
+      this.timer = setTimeout(function () { self.hide(); }, 5000);
+    },
+    hide: function () { var el = $('toast'); if (el) el.className = 'toast hidden'; this.undo = null; }
+  };
+
   Apps.groceries = {
     title: 'Groceries',
-    headerActions: '<button class="btn small" data-action="groc-clear">Clear ticked</button>',
+    view: 'list',
+    headerActions: '<button class="btn primary small" data-action="meal-new">+ Create meal</button>',
     shell: function () {
-      return '<form class="add-row flex" data-form="groc-add"><input class="field grow" id="groc-input" placeholder="Add an item…" autocomplete="off" autocorrect="on">' +
+      return '<div class="tabs flex" id="groc-tabs"></div>' +
+        '<div id="groc-view-list">' +
+        '<form class="add-row flex" data-form="groc-add"><input class="field grow" id="groc-input" placeholder="Add an item…" autocomplete="off" autocorrect="on">' +
         '<button class="btn primary" type="submit">Add</button></form>' +
-        '<div class="chips flex wrap" id="groc-chips"></div><div id="groc-list"></div>';
+        '<div id="groc-list"></div><div class="chips flex wrap" id="groc-chips"></div></div>' +
+        '<div id="groc-view-meals" class="hidden"></div>';
     },
     render: function () {
-      var g = groc();
-      var onList = {};
-      g.items.forEach(function (i) { onList[i.name.toLowerCase()] = true; });
-      var favs = g.history.filter(function (h) { return !onList[h.name.toLowerCase()]; })
-        .sort(function (a, b) { return b.count - a.count; }).slice(0, 14)
-        .map(function (h) { return h.name; });
-      $('groc-chips').innerHTML = favs.length ? favs.map(function (n) {
-        return '<button class="chip" data-action="groc-quick" data-name="' + esc(n) + '">+ ' + esc(n) + '</button>';
-      }).join('') : '';
+      var self = this, g = groc();
+      var open = g.items.filter(function (i) { return !i.done; });
+      $('groc-tabs').innerHTML =
+        '<button class="tab grow' + (this.view === 'list' ? ' active' : '') + '" data-action="groc-view" data-v="list">🛒 Shopping list (' + open.length + ')</button>' +
+        '<button class="tab grow' + (this.view === 'meals' ? ' active' : '') + '" data-action="groc-view" data-v="meals">🍝 Meals (' + Store.data.meals.length + ')</button>';
+      $('groc-view-list').className = this.view === 'list' ? '' : 'hidden';
+      $('groc-view-meals').className = this.view === 'meals' ? '' : 'hidden';
 
-      var items = g.items.slice().sort(function (a, b) { return (a.done ? 1 : 0) - (b.done ? 1 : 0) || a.added - b.added; });
-      var h = '<div class="list">';
-      if (!items.length) h += '<div class="list-empty">The list is empty 🎉</div>';
-      items.forEach(function (i) {
-        h += '<div class="row flex center' + (i.done ? ' done' : '') + '" data-action="groc-toggle" data-id="' + i.id + '">' +
-          '<div class="check">' + (i.done ? '✓' : '') + '</div><div class="text grow">' + esc(i.name) + '</div>' +
-          '<button class="del" data-action="groc-del" data-id="' + i.id + '">✕</button></div>';
-      });
-      $('groc-list').innerHTML = h + '</div>';
-    },
-    add: function (name) {
-      name = name.trim();
-      if (!name) return;
-      var g = groc();
-      for (var i = 0; i < g.items.length; i++) {
-        if (g.items[i].name.toLowerCase() === name.toLowerCase()) { g.items[i].done = false; Store.save('groceries'); return; }
+      if (this.view === 'list') {
+        var h = '<div class="list">';
+        if (!open.length) h += '<div class="list-empty">The list is empty 🎉</div>';
+        open.slice().sort(function (a, b) { return a.added - b.added; }).forEach(function (i) {
+          h += '<div class="row flex center" data-action="groc-tick" data-id="' + i.id + '">' +
+            '<div class="check"></div><div class="text grow">' + esc(i.name) +
+            (i.meal ? '<div class="meta">for ' + esc(i.meal) + '</div>' : '') + '</div></div>';
+        });
+        $('groc-list').innerHTML = h + '</div>';
+        var favs = g.history.filter(function (x) { return !onList(x.name); })
+          .sort(function (a, b) { return b.count - a.count; }).slice(0, 16);
+        $('groc-chips').innerHTML = favs.length ? '<div class="section-label" style="width:100%">Buy again</div>' + favs.map(function (x) {
+          return '<button class="chip" data-action="groc-quick" data-name="' + esc(x.name) + '">+ ' + esc(x.name) + '</button>';
+        }).join('') : '';
+      } else {
+        var meals = Store.data.meals.slice().sort(function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; });
+        var mh = '';
+        if (!meals.length) mh = '<div class="list"><div class="list-empty">No meals yet.<br><br><button class="btn primary" data-action="meal-new">+ Create meal</button></div></div>';
+        else {
+          mh = '<p class="muted small" style="margin-top:0">Tap <b>Add to list</b> to put a meal’s ingredients on the shopping list. Anything already on the list isn’t added twice.</p><div class="list">';
+          meals.forEach(function (m) {
+            var missing = m.ingredients.filter(function (x) { return !onList(x); }).length;
+            mh += '<div class="row flex center"><div class="text grow" data-action="meal-edit" data-id="' + m.id + '">' +
+              '<div><b>' + esc(m.name) + '</b></div><div class="meta">' + esc(m.ingredients.join(', ')) + '</div></div>' +
+              '<button class="btn small" data-action="meal-edit" data-id="' + m.id + '" style="margin-right:8px">Edit</button>' +
+              (missing ? '<button class="btn primary small" data-action="meal-add" data-id="' + m.id + '">+ Add to list</button>'
+                : '<span class="muted small" style="padding:0 6px">✓ On list</span>') +
+              '</div>';
+          });
+          mh += '</div>';
+        }
+        $('groc-view-meals').innerHTML = mh;
       }
-      g.items.push({ id: uid(), name: name, done: false, added: Date.now() });
-      Store.save('groceries');
+    },
+    add: function (name, meal) {
+      name = name.trim();
+      if (!name || onList(name)) return false;
+      groc().items.push({ id: uid(), name: name, done: false, added: Date.now(), meal: meal || '' });
+      return true;
+    },
+    mealEditor: function (m) {
+      var isNew = !m;
+      m = m || { name: '', ingredients: [] };
+      Modal.open(isNew ? 'Create meal' : 'Edit meal',
+        '<input class="field" name="name" placeholder="Meal name, e.g. Spaghetti bolognese" value="' + esc(m.name) + '">' +
+        '<label class="lbl">Ingredients – one per line</label>' +
+        '<textarea class="field" name="ingredients" rows="8" placeholder="Spaghetti\nMince\nChopped tomatoes\nOnion\nGarlic">' + esc(m.ingredients.join('\n')) + '</textarea>' +
+        (isNew ? '' : '<button class="btn danger small" data-action="meal-del" data-id="' + m.id + '">Delete meal</button>'),
+        function () {
+          var name = Modal.val('name');
+          var ingredients = Modal.val('ingredients').split(/\n|,/).map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+          if (!name || !ingredients.length) { alert('Give the meal a name and at least one ingredient.'); return false; }
+          if (isNew) Store.data.meals.push({ id: uid(), name: name, ingredients: ingredients });
+          else { m.name = name; m.ingredients = ingredients; }
+          Store.save('meals');
+          Apps.groceries.view = 'meals';
+        });
     },
     actions: {
-      'groc-add': function () { var el = $('groc-input'); Apps.groceries.add(el.value); el.value = ''; },
-      'groc-quick': function (el) { Apps.groceries.add(el.getAttribute('data-name')); },
-      'groc-toggle': function (el) {
-        var id = el.getAttribute('data-id');
-        groc().items.forEach(function (i) { if (i.id === id) i.done = !i.done; });
-        Store.save('groceries');
+      'groc-view': function (el) { Apps.groceries.view = el.getAttribute('data-v'); },
+      'groc-add': function () {
+        var el = $('groc-input');
+        if (Apps.groceries.add(el.value)) Store.save('groceries');
+        el.value = '';
       },
-      'groc-del': function (el) {
-        var id = el.getAttribute('data-id');
-        var g = groc();
-        g.items = g.items.filter(function (i) { return i.id !== id; });
+      'groc-quick': function (el) { if (Apps.groceries.add(el.getAttribute('data-name'))) Store.save('groceries'); },
+      'groc-tick': function (el) {
+        var id = el.getAttribute('data-id'), g = groc(), removed = null, at = -1;
+        for (var i = 0; i < g.items.length; i++) if (g.items[i].id === id) { removed = g.items[i]; at = i; }
+        if (!removed) return;
+        g.items.splice(at, 1);
+        bumpHistory(removed.name);
         Store.save('groceries');
-      },
-      'groc-clear': function () {
-        var g = groc();
-        g.items.forEach(function (i) {
-          if (!i.done) return;
-          var h = null;
-          for (var j = 0; j < g.history.length; j++) if (g.history[j].name.toLowerCase() === i.name.toLowerCase()) h = g.history[j];
-          if (h) h.count++; else g.history.push({ name: i.name, count: 1 });
+        Toast.show('Got ' + removed.name, function () {
+          if (onList(removed.name)) return;
+          groc().items.push(removed);
+          Store.save('groceries');
         });
-        g.items = g.items.filter(function (i) { return !i.done; });
+      },
+      'meal-new': function () { Apps.groceries.mealEditor(null); },
+      'meal-edit': function (el) { var m = findMeal(el.getAttribute('data-id')); if (m) Apps.groceries.mealEditor(m); },
+      'meal-del': function (el) {
+        var id = el.getAttribute('data-id'), m = findMeal(id);
+        if (!m || !confirm('Delete the meal “' + m.name + '”?')) return;
+        Store.data.meals = Store.data.meals.filter(function (x) { return x.id !== id; });
+        Store.save('meals');
+        Modal.close();
+      },
+      'meal-add': function (el) {
+        var m = findMeal(el.getAttribute('data-id'));
+        if (!m) return;
+        var added = [];
+        m.ingredients.forEach(function (x) { if (Apps.groceries.add(x, m.name)) added.push(x); });
+        if (!added.length) return Toast.show('Everything for ' + m.name + ' is already on the list');
         Store.save('groceries');
+        Toast.show('Added ' + added.length + ' item' + (added.length > 1 ? 's' : '') + ' for ' + m.name, function () {
+          var g = groc();
+          g.items = g.items.filter(function (i) { return !(i.meal === m.name && added.indexOf(i.name) >= 0); });
+          Store.save('groceries');
+        });
       }
     }
   };
@@ -580,10 +785,26 @@
   };
 
   // ---- Cameras ---------------------------------------------------------------
+  // Modern browsers (phones, newer iPads) can run go2rtc's own player, which
+  // picks the best format (WebRTC/MSE/HLS). Old iPads get plain HLS video.
+  var MODERN = (function () { try { return !!new Function('return async () => ({ ...{} })?.x'); } catch (e) { return false; } })();
   function cameras() {
     return Store.data.settings.cameras.map(function (c, i) {
-      return { id: i, name: c.name, type: c.type || 'mjpeg', url: c.url, refreshSeconds: c.refreshSeconds || 2 };
+      var cam = { id: i, name: c.name, type: c.type || 'mjpeg', url: c.url, refreshSeconds: c.refreshSeconds || 2 };
+      if (cam.type === 'go2rtc') {
+        var base = (c.server || '').replace(/\/+$/, ''), src = encodeURIComponent(c.stream || '');
+        cam.server = base;
+        if (MODERN) { cam.type = 'iframe'; cam.url = base + '/stream.html?src=' + src + '&mode=webrtc,mse,hls,mjpeg'; }
+        else { cam.type = 'hls'; cam.url = base + '/api/stream.m3u8?src=' + src; }
+      }
+      return cam;
     });
+  }
+  function blockedCameraServer() {
+    if (location.protocol !== 'https:') return '';
+    var cams = cameras();
+    for (var i = 0; i < cams.length; i++) if (/^http:/i.test(cams[i].url)) return cams[i].server || cams[i].url.replace(/^(http:\/\/[^\/]+).*$/i, '$1');
+    return '';
   }
   // Streams only run while this screen is open (saves Wi-Fi and Ring battery).
   Apps.cameras = {
@@ -595,10 +816,17 @@
       if (!cams.length) {
         return '<div class="list"><div class="list-empty">No cameras set up yet.<br><br><button class="btn primary" data-action="open" data-app="settings">Open Settings</button></div></div>';
       }
-      var h = '<div class="cams flex wrap">';
+      var h = '', blocked = blockedCameraServer();
+      if (blocked) {
+        h += '<div class="notif warn flex center" style="margin-bottom:16px"><div class="icon">⚠️</div><div class="body grow">' +
+          '<div class="title">Cameras may not play on this version</div>' +
+          '<div class="sub">This copy of House Hub is https, and most browsers block http:// cameras inside it. At home, open House Hub from your camera box instead.</div></div>' +
+          '<a class="btn primary small" href="' + esc(blocked) + '/" target="_blank">Open home version</a></div>';
+      }
+      h += '<div class="cams flex wrap">';
       cams.forEach(function (c) {
         h += '<div class="cam"><div class="cam-inner" data-action="cam-full" data-id="' + c.id + '">' + Apps.cameras.media(c) +
-          '<div class="cam-name">' + esc(c.name) + '</div></div></div>';
+          '<div class="cam-name flex between"><span>' + esc(c.name) + '</span><span>⤢</span></div></div></div>';
       });
       return h + '</div><p class="muted small">Tap a camera for full screen. Streams stop when you leave this screen.</p>';
     },
@@ -611,7 +839,8 @@
     },
     start: function (root) {
       var self = this;
-      this.stop();
+      this.timers.forEach(clearInterval);
+      this.timers = [];
       var imgs = root.querySelectorAll('img.cam-media');
       for (var i = 0; i < imgs.length; i++) (function (img) {
         var cam = cameras()[+img.getAttribute('data-cam')];
@@ -801,6 +1030,9 @@
         '<button class="btn danger" data-action="set-unsync" style="margin:0 10px 10px 0">Stop syncing</button></div>' +
         '<div id="set-status" class="small"></div>' +
         '<textarea class="field hidden" id="set-link" rows="3" readonly style="margin-top:10px;font-size:14px"></textarea>' +
+        '<label class="lbl" style="margin-top:14px">Got a setup link? Paste it here</label>' +
+        '<div class="flex"><input class="field grow" id="set-paste" placeholder="https://…#join=…" autocapitalize="off" autocorrect="off" style="margin-right:10px">' +
+        '<button class="btn" data-action="set-paste">Connect</button></div>' +
         '</div>' +
 
         '<div class="section-label">Home screen</div>' +
@@ -810,14 +1042,24 @@
         '<div class="text grow">This device is the wall display<div class="meta">Goes back home after 3 idle minutes and dims 23:00–06:00. Only affects this device.</div></div></div>' +
         '</div>' +
 
-        '<div class="section-label">Calendars (.ics feeds)</div>' +
+        '<div class="section-label">Google Calendar sync (two-way)</div>' +
+        '<div class="list" style="padding:16px">' +
+        '<p class="muted small" style="margin-top:0">Shows your Google calendars here and saves events you add here into Google. Needs the free House Hub worker (see README).</p>' +
+        '<label class="lbl">Worker URL</label><input class="field" id="g-url" placeholder="https://house-hub.yourname.workers.dev" value="' + esc(s.google.url) + '" autocapitalize="off" autocorrect="off">' +
+        '<label class="lbl" style="margin-top:10px">Access token (HUB_TOKEN)</label><input class="field" id="g-token" type="password" value="' + esc(s.google.token) + '" autocapitalize="off" autocorrect="off">' +
+        '<div class="flex wrap" style="margin-top:12px"><button class="btn primary" data-action="set-google" style="margin:0 10px 10px 0">Save &amp; test</button>' +
+        '<button class="btn danger" data-action="set-google-off" style="margin:0 10px 10px 0">Disconnect</button></div>' +
+        '<div id="g-status" class="small"></div>' +
+        '</div>' +
+
+        '<div class="section-label">Other calendars (.ics feeds, read-only)</div>' +
         '<div id="set-cals"></div>' +
         '<form class="list" style="padding:16px" data-form="set-addcal">' +
         '<label class="lbl">Name</label><input class="field" id="cal-name" placeholder="Family">' +
         '<label class="lbl" style="margin-top:10px">Secret iCal address (Google: Settings → Integrate calendar)</label><input class="field" id="cal-url" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" autocapitalize="off" autocorrect="off">' +
         '<label class="lbl" style="margin-top:10px">Colour</label>' + colorSelect('cal-color') +
         '<button class="btn primary" type="submit" style="margin-top:12px">Add calendar</button>' +
-        '<label class="lbl" style="margin-top:18px">CORS proxy (needed for Google &amp; iCloud feeds – see README)</label>' +
+        '<label class="lbl" style="margin-top:18px">CORS proxy (leave blank to use the House Hub worker above)</label>' +
         '<div class="flex"><input class="field grow" id="set-proxy" placeholder="https://my-proxy.workers.dev/?url=" value="' + esc(s.corsProxy) + '" autocapitalize="off" autocorrect="off" style="margin-right:10px">' +
         '<button class="btn" type="button" data-action="set-proxy">Save</button></div>' +
         '</form>' +
@@ -827,9 +1069,14 @@
         '<form class="list" style="padding:16px" data-form="set-addcam">' +
         '<label class="lbl">Name</label><input class="field" id="cam-name" placeholder="Front door (Ring)">' +
         '<label class="lbl" style="margin-top:10px">Type</label><select class="field" id="cam-type">' +
-        '<option value="mjpeg">MJPEG stream (best for old iPads)</option><option value="hls">HLS video (.m3u8)</option>' +
-        '<option value="snapshot">Snapshot image, refreshed every 2s</option><option value="iframe">Web page</option></select>' +
-        '<label class="lbl" style="margin-top:10px">Stream URL</label><input class="field" id="cam-url" placeholder="http://192.168.1.10:1984/api/stream.mjpeg?src=garage" autocapitalize="off" autocorrect="off">' +
+        '<option value="go2rtc">go2rtc camera (recommended)</option>' +
+        '<option value="mjpeg">MJPEG stream URL</option><option value="hls">HLS video URL (.m3u8)</option>' +
+        '<option value="snapshot">Snapshot image URL, refreshed every 2s</option><option value="iframe">Web page URL</option></select>' +
+        '<div id="cam-go2rtc-fields">' +
+        '<label class="lbl" style="margin-top:10px">go2rtc address</label><input class="field" id="cam-server" placeholder="http://192.168.1.10:1984" autocapitalize="off" autocorrect="off">' +
+        '<label class="lbl" style="margin-top:10px">Stream name (as in go2rtc.yaml)</label><input class="field" id="cam-stream" placeholder="ring_doorbell" autocapitalize="off" autocorrect="off">' +
+        '</div>' +
+        '<div id="cam-url-fields" class="hidden"><label class="lbl" style="margin-top:10px">Stream URL</label><input class="field" id="cam-url" placeholder="http://192.168.1.10:1984/api/stream.mjpeg?src=garage" autocapitalize="off" autocorrect="off"></div>' +
         '<button class="btn primary" type="submit" style="margin-top:12px">Add camera</button>' +
         '</form>';
     },
@@ -847,8 +1094,16 @@
           '<button class="del" data-action="set-delcal" data-i="' + i + '">✕</button></div>';
       }).join('') + '</div>' : '';
       if (Store.calendar.errors.length) $('set-cals').innerHTML += '<p class="small overdue">' + esc(Store.calendar.errors.join(' · ')) + '</p>';
+      var gs = $('g-status'), G = Store.google;
+      if (!Store.googleOn()) { gs.className = 'small muted'; gs.textContent = 'Not connected.'; }
+      else if (G.status === 'error') { gs.className = 'small sync bad'; gs.textContent = '● ' + G.errors.join('; '); }
+      else if (G.status === 'ok') {
+        gs.className = 'small sync ' + (G.errors.length ? 'bad' : 'ok');
+        gs.textContent = (G.calendars.length ? '● Connected: ' + G.calendars.map(function (c) { return c.name; }).join(', ') + ' (' + G.events.length + ' events)' : '● Worker reachable, but no calendars – check GOOGLE_CALENDAR_IDS') +
+          (G.errors.length ? ' · Problems: ' + G.errors.join('; ') : '');
+      } else { gs.className = 'small muted'; gs.textContent = 'Checking…'; }
       $('set-cams').innerHTML = s.cameras.length ? '<div class="list">' + s.cameras.map(function (c, i) {
-        return '<div class="row flex center"><div class="text grow">' + esc(c.name) + '<div class="meta">' + esc(c.type) + ' · ' + esc(c.url) + '</div></div>' +
+        return '<div class="row flex center"><div class="text grow">' + esc(c.name) + '<div class="meta">' + esc(c.type) + ' · ' + esc(c.type === 'go2rtc' ? c.server + ' → ' + c.stream : c.url) + '</div></div>' +
           '<button class="del" data-action="set-delcam" data-i="' + i + '">✕</button></div>';
       }).join('') + '</div>' : '';
     },
@@ -876,7 +1131,28 @@
         t.className = 'field'; t.value = link; t.focus(); t.select();
         try { document.execCommand('copy'); } catch (e) { /* ignore */ }
       },
+      'set-paste': function () {
+        var m = /#join=(.+)$/.exec($('set-paste').value.trim());
+        var cfg = null;
+        try { cfg = m && JSON.parse(decodeURIComponent(m[1])); } catch (e) { /* bad link */ }
+        if (!cfg || !cfg.db || !cfg.key) return alert('That doesn\u2019t look like a House Hub setup link.');
+        Store.setSync(cfg);
+        $('set-db').value = cfg.db; $('set-key').value = cfg.key; $('set-paste').value = '';
+      },
       'set-title': function () { Store.data.settings.title = $('set-title').value.trim() || 'Our Home'; Store.save('settings'); },
+      'set-google': function () {
+        var url = $('g-url').value.trim().replace(/\/+$/, ''), token = $('g-token').value.trim();
+        if (!/^https:\/\//.test(url)) return alert('The worker URL should start with https://');
+        Store.data.settings.google = { url: url, token: token };
+        Store.google.status = 'checking';
+        Store.save('settings');
+      },
+      'set-google-off': function () {
+        if (!confirm('Disconnect Google Calendar? Events stay in Google; they just won\u2019t show here.')) return;
+        Store.data.settings.google = { url: '', token: '' };
+        $('g-url').value = ''; $('g-token').value = '';
+        Store.save('settings');
+      },
       'set-proxy': function () { Store.data.settings.corsProxy = $('set-proxy').value.trim(); Store.save('settings'); },
       'set-wall': function () {
         var d = Device.get(); d.wall = !d.wall; Device.set(d);
@@ -892,10 +1168,19 @@
       },
       'set-delcal': function (el) { Store.data.settings.calendars.splice(+el.getAttribute('data-i'), 1); Store.save('settings'); },
       'set-addcam': function () {
-        var url = $('cam-url').value.trim();
-        if (!url) return;
-        Store.data.settings.cameras.push({ name: $('cam-name').value.trim() || 'Camera', type: $('cam-type').value, url: url });
-        $('cam-name').value = ''; $('cam-url').value = '';
+        var type = $('cam-type').value, name = $('cam-name').value.trim() || 'Camera';
+        if (type === 'go2rtc') {
+          var server = $('cam-server').value.trim().replace(/\/+$/, ''), stream = $('cam-stream').value.trim();
+          if (!/^https?:\/\//.test(server) || !stream) return alert('Enter the go2rtc address (e.g. http://192.168.1.10:1984) and the stream name.');
+          Store.data.settings.cameras.push({ name: name, type: type, server: server, stream: stream });
+          $('cam-stream').value = '';
+        } else {
+          var url = $('cam-url').value.trim();
+          if (!url) return;
+          Store.data.settings.cameras.push({ name: name, type: type, url: url });
+          $('cam-url').value = '';
+        }
+        $('cam-name').value = '';
         Store.save('settings');
       },
       'set-delcam': function (el) { Store.data.settings.cameras.splice(+el.getAttribute('data-i'), 1); Store.save('settings'); }
@@ -929,15 +1214,21 @@
       });
     }
 
-    // To-dos overdue / due today / due tomorrow.
-    var open = Store.data.todos.filter(function (t) { return !t.done && t.due; });
-    var overdue = open.filter(function (t) { return t.due < today; });
-    var dueToday = open.filter(function (t) { return t.due === today; });
-    var dueTom = open.filter(function (t) { return t.due === tomorrow; });
-    function names(list) { return list.slice(0, 4).map(function (t) { return t.text; }).join(' · '); }
-    if (overdue.length) out.push({ cls: 'warn', icon: '⚠️', app: 'todo', title: overdue.length + ' overdue task' + (overdue.length > 1 ? 's' : ''), sub: names(overdue) });
-    if (dueToday.length) out.push({ cls: 'warn', icon: '✅', app: 'todo', title: dueToday.length + ' task' + (dueToday.length > 1 ? 's' : '') + ' due today', sub: names(dueToday) });
-    if (dueTom.length) out.push({ cls: '', icon: '✅', app: 'todo', title: dueTom.length + ' task' + (dueTom.length > 1 ? 's' : '') + ' due tomorrow', sub: names(dueTom) });
+    // Every open to-do gets its own card (overdue / due soonest first), with
+    // a Done button so it can be ticked off from the home screen.
+    var open = Store.data.todos.filter(function (t) { return !t.done; }).sort(function (a, b) {
+      var da = a.due || '9999', db = b.due || '9999';
+      return da < db ? -1 : da > db ? 1 : (b.created || 0) - (a.created || 0);
+    });
+    var MAX_TODOS = 8;
+    open.slice(0, MAX_TODOS).forEach(function (t) {
+      var late = t.due && t.due < today, soon = t.due && t.due <= tomorrow;
+      out.push({
+        cls: late || t.due === today ? 'warn' : 'todo', icon: late ? '⚠️' : '✅', app: 'todo', tick: t.id, whoHtml: whoTag(t.who), title: t.text,
+        sub: t.due ? (late ? 'Overdue – was due ' : 'Due ') + fmtDayShort(t.due).replace(/^(Today|Tomorrow|Yesterday)$/, function (x) { return x.toLowerCase(); }) : (soon ? '' : 'To-do')
+      });
+    });
+    if (open.length > MAX_TODOS) out.push({ cls: 'todo', icon: '✅', app: 'todo', title: '+ ' + (open.length - MAX_TODOS) + ' more task' + (open.length - MAX_TODOS > 1 ? 's' : ''), sub: 'Tap to see the full list' });
 
     // Evening nudge for unfinished checklists.
     if (now.getHours() >= 18) {
@@ -973,7 +1264,8 @@
     $('notifications').innerHTML = list.length ? list.map(function (n) {
       return '<div class="notif flex center ' + n.cls + '"' + (n.app ? ' data-action="open" data-app="' + n.app + '"' + (n.who ? ' data-who="' + n.who + '"' : '') : '') + '>' +
         '<div class="icon">' + n.icon + '</div><div class="body grow"><div class="title">' + esc(n.title) + '</div>' +
-        (n.sub ? '<div class="sub">' + esc(n.sub) + '</div>' : '') + '</div>' +
+        (n.sub || n.whoHtml ? '<div class="sub">' + (n.whoHtml || '') + esc(n.sub || '') + '</div>' : '') + '</div>' +
+        (n.tick ? '<button class="btn small" data-action="home-todo-done" data-id="' + n.tick + '">✓ Done</button>' : '') +
         (n.dismiss ? '<button class="x" data-action="dismiss-note" data-id="' + n.dismiss + '">✕</button>' : '') + '</div>';
     }).join('') : '<div class="empty-notif">All quiet – nothing needs attention 🌿</div>';
 
@@ -1061,6 +1353,21 @@
           Store.save('notes');
         }, 'Post');
     }
+    if (action === 'home-todo-done') {
+      var tid = el.getAttribute('data-id');
+      Store.data.todos.forEach(function (t) {
+        if (t.id !== tid) return;
+        t.done = true; t.doneAt = Date.now();
+        Toast.show('Done: ' + t.text, function () { t.done = false; t.doneAt = null; Store.save('todos'); });
+      });
+      return Store.save('todos');
+    }
+    if (action === 'toast-undo') {
+      var fn = Toast.undo;
+      Toast.hide();
+      if (fn) fn();
+      return;
+    }
     if (action === 'dismiss-note') {
       e.stopPropagation();
       var id = el.getAttribute('data-id');
@@ -1071,6 +1378,14 @@
     if (app && app.actions[action]) {
       app.actions[action](el);
       app.render();
+    }
+  }, false);
+
+  document.addEventListener('change', function (e) {
+    if (e.target.id === 'cam-type') {
+      var g = e.target.value === 'go2rtc';
+      $('cam-go2rtc-fields').className = g ? '' : 'hidden';
+      $('cam-url-fields').className = g ? 'hidden' : '';
     }
   }, false);
 
