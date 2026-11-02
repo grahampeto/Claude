@@ -69,7 +69,7 @@ button:disabled { opacity: .5; cursor: default; }
 .stat span { color: var(--muted); font-size: .8rem; }
 .short { color: var(--warn); font-size: .9rem; margin-top: 6px; }
 label { display: block; font-size: .9rem; margin: 10px 0 4px; color: var(--muted); }
-input { font: inherit; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+input, select { font: inherit; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--bg); color: var(--ink); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
 .qty-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; align-items: center; padding: 6px 0; font-variant-numeric: tabular-nums; }
@@ -109,7 +109,7 @@ label.check input { width: 20px; height: 20px; }
 .dose-row.changed input[type=number] { border-color: var(--accent); }
 .save-bar { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
 .fill-list .qty-row input[readonly] { border-color: transparent; background: transparent; font-weight: 700; }
-.fill-list .note { display: block; font-size: .8rem; color: var(--muted); }
+.qty-row .note, .fill-list .note { display: block; font-size: .8rem; color: var(--muted); }
 .big-fill { width: 100%; }
 @media (max-width: 380px) { .actions, .row { grid-template-columns: 1fr; } .dose-row { grid-template-columns: minmax(0,1fr) 72px 70px; } }
 </style>
@@ -194,8 +194,12 @@ label.check input { width: 20px; height: 20px; }
     <label for="mName">Name and strength</label>
     <input id="mName" placeholder="e.g. Prednisone 5 mg">
     <div class="row">
-      <div id="mPerWeekWrap"><label for="mPerWeek">Pills per week</label><input id="mPerWeek" type="number" min="0.05" step="any" inputmode="decimal"></div>
+      <div id="mPerWeekWrap"><label for="mPerWeek" id="mPerWeekLabel">Pills per week</label><input id="mPerWeek" type="number" min="0.05" step="any" inputmode="decimal"></div>
       <div><label for="mPack">Pills per pharmacy pickup</label><input id="mPack" type="number" min="1" inputmode="numeric"></div>
+    </div>
+    <div class="row">
+      <div><label for="mFreq">How often</label><select id="mFreq"><option value="weekly">Every week</option><option value="monthly">Once a month</option></select></div>
+      <div id="mDayWrap"><label for="mDay">On day of the month</label><input id="mDay" type="number" min="1" max="31" inputmode="numeric"></div>
     </div>
     <div class="row">
       <div><label for="mStock">Loose pills at home now (not in the dispenser)</label><input id="mStock" type="number" min="0" step="any" inputmode="decimal"></div>
@@ -215,7 +219,7 @@ label.check input { width: 20px; height: 20px; }
   <form method="dialog" id="formPickup">
     <h2>Pharmacy pickup</h2>
     <label for="pDate">Date</label><input id="pDate" type="date">
-    <p class="muted">How many pills of each did you get? Medications on this month's order are filled in. Enter 0 for any you didn't collect.</p>
+    <p class="muted">Type how many pills of each you received. Leave the rest empty.</p>
     <div id="pickupRows"></div>
     <div class="dialog-actions">
       <button type="button" data-close>Cancel</button>
@@ -269,7 +273,10 @@ function rel(n) { return n === 0 ? "today" : n === 1 ? "tomorrow" : n === -1 ? "
 function num(n) { return String(Math.round(n * 100) / 100); }
 function pills(n) { return num(Math.ceil(n * 4 - 1e-6) / 4); }   // shown counts, rounded up to a quarter pill
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function dose(pw) {
+function ordinal(n) { const s = ["th", "st", "nd", "rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+function dose(m) {
+  if (isMonthly(m)) return `${num(m.perMonth)} on the ${ordinal(m.monthDay)} of each month`;
+  const pw = m.perWeek;
   if (pw >= 7 && Math.abs(pw / 7 - Math.round(pw / 7 * 4) / 4) < 1e-9) return `${num(pw / 7)} a day`;
   if (pw < 1) return `1 every ${num(1 / pw)} weeks`;
   return `${num(pw)} a week`;
@@ -316,11 +323,31 @@ function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); 
 let state = readLocal() || blank();
 function uid() { return Math.random().toString(36).slice(2, 10); }
 const rate = m => m.perWeek / 7;
+const isMonthly = m => !!m.monthDay;
+const amountOf = m => isMonthly(m) ? m.perMonth : m.perWeek;
+const unitOf = m => isMonthly(m) ? "a month" : "a week";
+function doseDay(m, d) { // the dose day in d's month (the 31st becomes the month's last day)
+  const [y, mo] = d.split("-").map(Number);
+  return Math.min(m.monthDay, new Date(Date.UTC(y, mo, 0)).getUTCDate());
+}
+function isDoseDay(m, d) { return +d.slice(8) === doseDay(m, d); }
+// Pills taken on the days from a up to (not including) b.
+function dosesBetween(m, a, b) {
+  const n = diffDays(b, a);
+  if (n <= 0) return 0;
+  if (!isMonthly(m)) return n * rate(m);
+  let c = 0;
+  for (let d = a; diffDays(b, d) > 0; d = addDays(d, 1)) if (isDoseDay(m, d)) c++;
+  return c * m.perMonth;
+}
 const active = () => state.meds.filter(m => m.active);
 const weeks = () => state.settings.fillDays / 7;
 const owed = m => (m.carry || 0) + m.perWeek * weeks();
-const fillAmount = m => Math.max(0, Math.ceil(owed(m) - 1e-9));
-const wholeFill = m => Math.abs(m.perWeek * weeks() - Math.round(m.perWeek * weeks())) < 1e-9;
+// Monthly doses: whatever falls in this fill's window, less what is already in the dispenser.
+const fillAmount = (m, date) => isMonthly(m)
+  ? Math.max(0, Math.ceil(dosesBetween(m, date, addDays(date, state.settings.fillDays)) - dispLeft(m, date) - 1e-9))
+  : Math.max(0, Math.ceil(owed(m) - 1e-9));
+const wholeFill = m => isMonthly(m) || Math.abs(m.perWeek * weeks() - Math.round(m.perWeek * weeks())) < 1e-9;
 
 // Storage: your private record in your Claude account when available, otherwise this browser only.
 let cloud = null;
@@ -362,7 +389,7 @@ function record(text, extra = {}) {
 
 // ---------- calculations ----------
 function dispLeft(m, today) {
-  const taken = Math.max(0, diffDays(today, m.dispAsOf || today)) * rate(m);
+  const taken = dosesBetween(m, m.dispAsOf || today, today);
   return Math.max(0, (m.disp || 0) - taken);
 }
 // Freeze the dispenser count at today before a dose or pause change, so past days use the old dose.
@@ -370,12 +397,23 @@ function settle(m, today) { m.disp = dispLeft(m, today); m.dispAsOf = today; }
 function project(m, today) {
   const { leadDays, cycleDays } = state.settings;
   const inDisp = dispLeft(m, today);
-  const daysLeft = Math.floor((m.stock + inDisp) / rate(m) + 1e-9);
-  const runOut = addDays(today, daysLeft);
+  let daysLeft, runOut;
+  if (isMonthly(m)) {          // walk forward to the first dose day you can't cover
+    let left = m.stock + inDisp, d = today;
+    for (let i = 0; i < 1500; i++, d = addDays(d, 1)) {
+      if (!isDoseDay(m, d)) continue;
+      if (left < m.perMonth - 1e-9) break;
+      left -= m.perMonth;
+    }
+    runOut = d; daysLeft = diffDays(d, today);
+  } else {
+    daysLeft = Math.floor((m.stock + inDisp) / rate(m) + 1e-9);
+    runOut = addDays(today, daysLeft);
+  }
   const orderBy = addDays(runOut, -leadDays);
   const orderIn = diffDays(orderBy, today);
   const level = orderIn <= 0 ? "bad" : orderIn <= cycleDays ? "warn" : "ok";
-  const need = fillAmount(m);
+  const need = fillAmount(m, today);
   return { inDisp, daysLeft, runOut, orderBy, orderIn, level, need, short: m.stock < need };
 }
 function nextFillDate() {
@@ -418,7 +456,7 @@ function render() {
         <span class="med-name">${esc(m.name)}</span>
         <span><span class="chip ${p.level}">${LABEL[p.level]}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
       </div>
-      <div class="muted">${dose(m.perWeek)} · ${num(m.pack)} per pickup</div>
+      <div class="muted">${dose(m)} · usually ${num(m.pack)} per pickup</div>
       <div class="stats">
         <div class="stat"><b>${pills(m.stock)}</b><span>loose at home</span></div>
         <div class="stat"><b>${pills(p.inDisp)}</b><span>in dispenser</span></div>
@@ -463,8 +501,9 @@ async function undo() {
 
 // ---------- weekly doses tab ----------
 let draft = {};   // id -> { perWeek, active } while editing
-function perFillText(pw, active) {
+function perFillText(pw, active, m) {
   if (!active) return "–";
+  if (m && isMonthly(m)) return `${num(pw)} on the ${ordinal(m.monthDay)}`;
   const per = pw * weeks();
   return Number.isInteger(Math.round(per * 1e6) / 1e6) ? `${num(per)}` : `avg ${num(per)}`;
 }
@@ -473,14 +512,15 @@ function renderDoses() {
   const list = [...active(), ...state.meds.filter(m => !m.active)];
   $("doseRows").innerHTML = list.length ? list.map(m => {
     const d = draft[m.id] || {};
-    const pw = d.perWeek != null ? d.perWeek : m.perWeek;
+    const pw = d.perWeek != null ? d.perWeek : amountOf(m);
     const on = d.active != null ? d.active : m.active;
     const changed = draft[m.id] ? " changed" : "";
     return `<div class="dose-row${on ? "" : " off"}${changed}" data-id="${m.id}">
       <div class="dose-name"><b>${esc(m.name)}</b>
+        ${isMonthly(m) ? `<span class="muted" style="font-size:.8rem">Monthly, on the ${ordinal(m.monthDay)}. Number is per month.</span>` : ""}
         <label class="check" for="da_${m.id}"><input type="checkbox" id="da_${m.id}" ${on ? "checked" : ""}> Taking</label></div>
-      <input type="number" id="dw_${m.id}" min="0.05" step="any" inputmode="decimal" value="${num(pw)}" aria-label="${esc(m.name)} pills per week">
-      <span class="per-fill" id="dp_${m.id}">${perFillText(pw, on)}</span>
+      <input type="number" id="dw_${m.id}" min="0.05" step="any" inputmode="decimal" value="${num(pw)}" aria-label="${esc(m.name)} pills ${unitOf(m)}">
+      <span class="per-fill" id="dp_${m.id}">${perFillText(pw, on, m)}</span>
     </div>`;
   }).join("") : `<p class="muted">No medications yet. Tap “+ Add medication”.</p>`;
   updateDoseBar();
@@ -495,11 +535,11 @@ $("doseRows").addEventListener("input", e => {
   const row = e.target.closest(".dose-row"); if (!row) return;
   const m = state.meds.find(x => x.id === row.dataset.id);
   const pw = +$("dw_" + m.id).value, on = $("da_" + m.id).checked;
-  if (pw === m.perWeek && on === m.active) delete draft[m.id];
+  if (pw === amountOf(m) && on === m.active) delete draft[m.id];
   else draft[m.id] = { perWeek: pw, active: on };
   row.classList.toggle("changed", !!draft[m.id]);
   row.classList.toggle("off", !on);
-  $("dp_" + m.id).textContent = pw > 0 ? perFillText(pw, on) : "–";
+  $("dp_" + m.id).textContent = pw > 0 ? perFillText(pw, on, m) : "–";
   updateDoseBar();
 });
 $("btnDoseReset").onclick = () => { draft = {}; renderDoses(); };
@@ -511,14 +551,15 @@ $("btnDoseSave").onclick = () => {
   const changes = Object.entries(draft).map(([id, d]) => [state.meds.find(m => m.id === id), d]);
   changes.forEach(([m, d]) => {
     if (m.active && !d.active) notes.push(`paused ${m.name}`);
-    else if (!m.active && d.active) notes.push(`resumed ${m.name} at ${num(d.perWeek)} a week`);
-    else notes.push(`${m.name} ${num(m.perWeek)} → ${num(d.perWeek)} a week`);
+    else if (!m.active && d.active) notes.push(`resumed ${m.name} at ${num(d.perWeek)} ${unitOf(m)}`);
+    else notes.push(`${m.name} ${num(amountOf(m))} → ${num(d.perWeek)} ${unitOf(m)}`);
   });
   record(`Dose change: ${notes.join("; ")}`, { kind: "dose" });
   changes.forEach(([m, d]) => {
     settle(m, today);
     if (m.active && !d.active) { m.stock += m.disp; m.disp = 0; }   // pills come out of the dispenser
-    m.active = d.active; m.perWeek = d.perWeek; m.carry = 0;
+    m.active = d.active; m.carry = 0;
+    if (isMonthly(m)) m.perMonth = d.perWeek; else m.perWeek = d.perWeek;
   });
   draft = {}; save(); toast("Doses saved");
 };
@@ -530,7 +571,10 @@ function openMed(id) {
   $("medTitle").textContent = editing ? `Edit ${editing.name}` : "Add medication";
   $("mName").value = editing ? editing.name : "";
   $("mPerWeekWrap").hidden = !!editing;            // doses are changed on the Weekly doses tab
-  $("mPerWeek").value = editing ? num(editing.perWeek) : 7;
+  $("mPerWeek").value = editing ? num(amountOf(editing)) : 7;
+  $("mFreq").value = editing && isMonthly(editing) ? "monthly" : "weekly";
+  $("mDay").value = editing && isMonthly(editing) ? editing.monthDay : 1;
+  syncFreq();
   $("mPack").value = editing ? editing.pack : 30;
   $("mStock").value = editing ? num(editing.stock) : "";
   $("mDisp").value = editing ? (editing.active ? pills(dispLeft(editing, todayISO())) : 0) : 0;
@@ -539,6 +583,12 @@ function openMed(id) {
   $("dlgMed").showModal();
 }
 $("btnAddMed").onclick = () => openMed(null);
+function syncFreq() {
+  const monthly = $("mFreq").value === "monthly";
+  $("mDayWrap").hidden = !monthly;
+  $("mPerWeekLabel").textContent = monthly ? "Pills each month" : "Pills per week";
+}
+$("mFreq").onchange = syncFreq;
 $("btnDeleteMed").onclick = async () => {
   const m = editing; if (!m) return;
   $("dlgMed").close();
@@ -552,34 +602,44 @@ $("formMed").addEventListener("submit", e => {
   const name = $("mName").value.trim(), perWeek = +$("mPerWeek").value, pack = +$("mPack").value,
         stock = $("mStock").value === "" ? NaN : +$("mStock").value, disp = +$("mDisp").value || 0;
   if (!name) { $("medErr").textContent = "Enter the medication's name."; return; }
-  if (!editing && !(perWeek > 0)) { $("medErr").textContent = "Pills per week must be more than 0."; return; }
+  if (!editing && !(perWeek > 0)) { $("medErr").textContent = "The number of pills must be more than 0."; return; }
+  const monthly = $("mFreq").value === "monthly", day = Math.round(+$("mDay").value);
+  if (monthly && !(day >= 1 && day <= 31)) { $("medErr").textContent = "Enter a day of the month from 1 to 31."; return; }
   if (!(pack > 0)) { $("medErr").textContent = "Pills per pickup must be more than 0."; return; }
   if (!(stock >= 0) || !(disp >= 0)) { $("medErr").textContent = "Enter how many pills you have now. Use 0 if none."; return; }
-  record(editing ? `Corrected counts for ${name}: ${num(stock)} loose, ${num(disp)} in dispenser` : `Added ${name} at ${num(perWeek)} a week (${num(stock)} loose, ${num(disp)} in dispenser)`);
+  record(editing ? `Corrected counts for ${name}: ${num(stock)} loose, ${num(disp)} in dispenser` : `Added ${name} at ${num(perWeek)} ${$("mFreq").value === "monthly" ? "a month" : "a week"} (${num(stock)} loose, ${num(disp)} in dispenser)`);
   const today = todayISO();
   if (editing) {
     const m = state.meds.find(x => x.id === editing.id);
-    Object.assign(m, { name, pack, stock: m.active ? stock : stock + disp, disp: m.active ? disp : 0, dispAsOf: today });
-  } else state.meds.push({ id: uid(), name, perWeek, pack, stock, disp, dispAsOf: today, active: true, carry: 0 });
+    Object.assign(m, { name, pack, stock: m.active ? stock : stock + disp, disp: m.active ? disp : 0, dispAsOf: today, carry: 0 });
+    if (monthly && !isMonthly(m)) { m.perMonth = 1; m.monthDay = day; }
+    else if (monthly) m.monthDay = day;
+    else if (!monthly && isMonthly(m)) { m.perWeek = m.perMonth * 12 / 52; delete m.monthDay; delete m.perMonth; }
+  } else state.meds.push(monthly
+      ? { id: uid(), name, perWeek: perWeek * 12 / 52, perMonth: perWeek, monthDay: day, pack, stock, disp, dispAsOf: today, active: true, carry: 0 }
+      : { id: uid(), name, perWeek, pack, stock, disp, dispAsOf: today, active: true, carry: 0 });
   $("dlgMed").close(); save(); toast(`Saved ${name}`);
 });
 
 // ---------- pharmacy pickup ----------
 $("btnPickup").onclick = () => {
   $("pDate").value = todayISO();
-  const list = [...active(), ...state.meds.filter(m => !m.active)];
-  $("pickupRows").innerHTML = list.map(m => `
-    <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}${m.active ? "" : ` <span class="muted">(paused)</span>`}</label>
-    <input id="pk_${m.id}" type="number" min="0" step="any" inputmode="decimal" value="${m.active && project(m, todayISO()).level !== "ok" ? m.pack : 0}"></div>`).join("");
+  const row = m => `
+    <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}<span class="note">usually ${num(m.pack)}</span></label>
+    <input id="pk_${m.id}" type="number" min="0" step="any" inputmode="numeric" placeholder="0"></div>`;
+  const paused = state.meds.filter(m => !m.active);
+  $("pickupRows").innerHTML = active().map(row).join("") +
+    (paused.length ? `<div class="group-label">Paused</div>` + paused.map(row).join("") : "");
   $("dlgPickup").showModal();
+  const first = document.querySelector("#pickupRows input"); if (first) first.focus();
 };
 $("formPickup").addEventListener("submit", e => {
   e.preventDefault();
   const got = state.meds.map(m => [m, Math.max(0, +$("pk_" + m.id).value || 0)]).filter(([, q]) => q > 0);
   $("dlgPickup").close();
-  if (!got.length) return;
+  if (!got.length) { toast("Nothing entered, so nothing was added."); return; }
   record(`Pharmacy pickup: ${got.map(([m, q]) => `${num(q)} × ${m.name}`).join(", ")}`, { date: $("pDate").value || todayISO(), kind: "pickup" });
-  got.forEach(([m, q]) => { m.stock += q; if (q !== m.pack) m.pack = q; });
+  got.forEach(([m, q]) => { m.stock += q; });
   save(); toast("Added to stock");
 });
 
@@ -591,10 +651,11 @@ $("btnFill").onclick = () => {
   $("fillIntro").textContent = `These amounts come from your weekly doses × ${num(wk)}. They'll be taken out of your loose stock.`;
   $("fillRows").innerHTML = active().map(m => `
     <div class="qty-row"><label for="fq_${m.id}">${esc(m.name)}
-      <span class="note">${num(m.perWeek)} a week${wholeFill(m) ? "" : " (whole pills only, so this alternates between fills)"} · ${pills(m.stock)} loose</span></label>
-    <input id="fq_${m.id}" type="number" min="0" step="any" inputmode="decimal" value="${fillAmount(m)}" readonly></div>`).join("");
+      <span class="note">${isMonthly(m) ? dose(m) : `${num(m.perWeek)} a week`}${wholeFill(m) ? "" : " (whole pills only, so this alternates between fills)"} · ${pills(m.stock)} loose</span></label>
+    <input id="fq_${m.id}" type="number" min="0" step="any" inputmode="decimal" value="${fillAmount(m, $("fDate").value || todayISO())}" readonly></div>`).join("");
   $("btnFillAdjust").hidden = false;
   checkFill();
+  $("fDate").onchange = () => { if (!$("btnFillAdjust").hidden) active().forEach(m => $("fq_" + m.id).value = fillAmount(m, $("fDate").value || todayISO())); checkFill(); };
   $("dlgFill").showModal();
 };
 $("btnFillAdjust").onclick = () => {
