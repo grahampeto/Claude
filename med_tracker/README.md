@@ -2,13 +2,11 @@
 
 A single-file web app (`index.html`) for tracking chronic medication. It needs no server and no install.
 
-- **📦 Got pills from pharmacy**: adds each pickup to your loose stock at home. Each medication's usual pack size is filled in for you.
-- **🗓️ Filled my dispenser**: moves a week's worth (pills/day × 7) from loose stock into the dispenser.
-- **Order banner**: works out when each medication runs out, counting loose pills plus what is left in the dispenser.
-  - Red **Order now**: you are inside your safety margin (default 7 days before running out).
-  - Amber **Order this month**: the medication will reach its order-by date before your next monthly order (default 30 days), so put it on this order.
-- Also warns when there aren't enough loose pills for the next full dispenser fill.
-- Keeps a history with **Undo**, plus JSON **export/import** for backups.
+- **Overview**: the date your next order is due, how many pills you have loose and in the dispenser, and how many days each medication lasts.
+- **Fill dispenser**: one button. It takes each weekly dose × your fill period (default 2 weeks) out of your loose stock. Doses that don't divide into whole pills, such as 1 every 4 weeks, alternate between fills.
+- **Got pills from pharmacy**: adds a pickup to your stock. Medications due on this month's order are filled in.
+- **Weekly doses**: change pills per week after a checkup, or untick "Taking" to pause one. Paused medications keep their count but are left out of fills and order alerts.
+- **History**: every pickup, fill and dose change, with Undo, plus backup export and import.
 
 ## Use it
 Online (private to you, saves to your Claude account): https://claude.ai/artifact/2VCXcG8F4FktqAB31ftaBp
