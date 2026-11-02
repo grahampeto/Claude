@@ -12,21 +12,21 @@
 :root {
   --bg: #f3f6f5; --card: #ffffff; --ink: #14201d; --muted: #5d6b67; --line: #dde5e2;
   --accent: #0e6b5c; --accent-ink: #ffffff;
-  --ok: #17663a; --ok-bg: #dcf3e4; --warn: #8a4b06; --warn-bg: #fdf0d5; --bad: #a3221b; --bad-bg: #fbe1de;
+  --ok: #17663a; --ok-bg: #dcf3e4; --warn: #a14a00; --warn-bg: #ffe3c7; --bad: #a3221b; --bad-bg: #fbe1de;
   --font: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0c1312; --card: #141d1b; --ink: #e3ebe8; --muted: #93a39e; --line: #25332f;
     --accent: #3cc4a9; --accent-ink: #062a23;
-    --ok: #6fdc98; --ok-bg: #0f2c1b; --warn: #f2bf5e; --warn-bg: #33250b; --bad: #f58a80; --bad-bg: #3a1311;
+    --ok: #6fdc98; --ok-bg: #0f2c1b; --warn: #ffa95a; --warn-bg: #3b2210; --bad: #f58a80; --bad-bg: #3a1311;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0c1312; --card: #141d1b; --ink: #e3ebe8; --muted: #93a39e; --line: #25332f;
   --accent: #3cc4a9; --accent-ink: #062a23;
-  --ok: #6fdc98; --ok-bg: #0f2c1b; --warn: #f2bf5e; --warn-bg: #33250b; --bad: #f58a80; --bad-bg: #3a1311;
+  --ok: #6fdc98; --ok-bg: #0f2c1b; --warn: #ffa95a; --warn-bg: #3b2210; --bad: #f58a80; --bad-bg: #3a1311;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -45,6 +45,7 @@ h2 { font-size: 1.05rem; margin: 0; }
 .banner.bad { background: var(--bad-bg); color: var(--bad); }
 .banner strong { display: block; font-size: 1.2rem; margin-bottom: 4px; }
 .banner ul { margin: 6px 0 0; padding-left: 20px; }
+.banners { display: flex; flex-direction: column; gap: 10px; }
 .banner .sub { margin-top: 8px; font-size: .9rem; opacity: .9; }
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
@@ -135,7 +136,7 @@ label.check input { width: 20px; height: 20px; }
 
   <!-- Overview -->
   <div class="view" id="view-overview">
-    <div id="banner"></div>
+    <div id="banner" class="banners"></div>
     <section class="card appt">
       <div class="appt-row">
         <label for="apptDate">Next doctor's appointment</label>
@@ -438,9 +439,9 @@ function nextFillDate() {
 }
 
 // ---------- render ----------
-const CHIP = { now: "bad", order: "bad", ok: "ok" };
-const LABEL_APPT = { now: "Order before appointment", order: "Order at appointment", ok: "Stocked" };
-const LABEL = { now: "Order now", order: "Order now", ok: "Stocked" };
+const CHIP = { now: "bad", order: "warn", ok: "ok" };
+const LABEL_APPT = { now: "Order now", order: "Order at appointment", ok: "Stocked" };
+const LABEL = { now: "Order now", order: "Order soon", ok: "Stocked" };
 function render() {
   const today = todayISO();
   const projs = active().map(m => ({ m, p: project(m, today) })).sort((a, b) => a.p.orderIn - b.p.orderIn);
@@ -448,11 +449,13 @@ function render() {
   const wk = weeks();
   const appt = upcomingAppt(today), hw = state.settings.horizonWeeks;
   const labels = appt ? LABEL_APPT : LABEL;
-  $("apptDate").value = state.settings.apptDate || "";
-  $("apptHint").textContent = state.settings.apptDate && !appt
-    ? `Your appointment on ${fmt(state.settings.apptDate)} has passed. Enter the next one.`
-    : `You order at this appointment. Anything that runs out within ${hw} weeks after it is flagged red.`;
-  $("apptHint").classList.toggle("short", !!(state.settings.apptDate && !appt));
+  // The saved date stays until the day after it; then the box shows empty for the next one.
+  const last = state.settings.apptDate && !appt ? state.settings.apptDate : null;
+  if (document.activeElement !== $("apptDate")) $("apptDate").value = appt || "";
+  $("apptHint").textContent = appt
+    ? `Saved. You order at this appointment. Anything that runs out before ${fmt(addDays(appt, hw * 7))} (${hw} weeks after it) is flagged.`
+    : last ? `Your appointment on ${fmt(last)} has passed. Enter the next date once you have it.`
+           : `Enter the date of your next appointment. It's saved until that day has passed.`;
 
   let html;
   if (!state.meds.length) {
@@ -467,16 +470,17 @@ function render() {
     const base = appt || today, horizon = addDays(base, hw * 7);
     if (appt) {
       const when = `${fmt(appt)} (${rel(diffDays(appt, today))})`;
+      const orderList = order.length ? `<ul>${order.map(item).join("")}</ul>` : "";
       if (now.length) {
-        html = `<div class="banner bad"><strong>Order before your appointment</strong>These run out before your appointment on ${when}. Place a pharmacy order now:<ul>${now.map(item).join("")}</ul>` +
-          (order.length ? `<div class="sub">Then order these at your appointment:</div><ul>${order.map(item).join("")}</ul>` : "") + fillLine + `</div>`;
+        html = `<div class="banner bad"><strong>Order now</strong>These run out before your appointment on ${when}. Place a pharmacy order now:<ul>${now.map(item).join("")}</ul>${fillLine}</div>` +
+          (order.length ? `<div class="banner warn"><strong>Order at your appointment: ${when}</strong>These run out within ${hw} weeks after it:${orderList}</div>` : "");
       } else if (order.length) {
-        html = `<div class="banner bad"><strong>Order at your appointment: ${when}</strong>These run out before ${fmt(horizon)}, ${hw} weeks after the appointment:<ul>${order.map(item).join("")}</ul>${fillLine}</div>`;
+        html = `<div class="banner warn"><strong>Order at your appointment: ${when}</strong>These run out within ${hw} weeks after it:${orderList}${fillLine}</div>`;
       } else {
         html = `<div class="banner ok"><strong>Next appointment: ${when}</strong>Nothing to order. Everything lasts past ${fmt(horizon)}, ${hw} weeks after the appointment.${fillLine}</div>`;
       }
     } else if (now.length || order.length) {
-      html = `<div class="banner bad"><strong>Order now</strong>These run out within the next ${hw} weeks:<ul>${[...now, ...order].map(item).join("")}</ul><div class="sub">Add your next appointment date below to plan your order around it.</div>${fillLine}</div>`;
+      html = `<div class="banner warn"><strong>Order soon</strong>These run out within the next ${hw} weeks:<ul>${[...now, ...order].map(item).join("")}</ul><div class="sub">Add your next appointment date below to plan your order around it.</div>${fillLine}</div>`;
     } else {
       html = `<div class="banner ok"><strong>Nothing to order</strong>Everything lasts past ${fmt(horizon)}. Add your next appointment date below to plan your order around it.${fillLine}</div>`;
     }
@@ -723,13 +727,16 @@ $("formFill").addEventListener("submit", e => {
 });
 
 // ---------- appointment ----------
-$("apptDate").onchange = () => {
+function saveAppt() {
   const v = $("apptDate").value;
-  if (v === (state.settings.apptDate || "")) return;
+  if (v && diffDays(v, todayISO()) < 0) { toast("That date has already passed. Enter your next appointment."); $("apptDate").value = upcomingAppt(todayISO()) || ""; return; }
+  if (v === (upcomingAppt(todayISO()) || "")) return;
   state.settings.apptDate = v;
   if (v) record(`Next appointment set to ${fmt(v)}`, { kind: "note" });
-  save(); toast(v ? "Appointment saved" : "Appointment cleared");
-};
+  save(); toast(v ? `Appointment saved: ${fmt(v)}` : "Appointment cleared");
+}
+$("apptDate").addEventListener("change", saveAppt);
+$("apptDate").addEventListener("blur", saveAppt);
 
 // ---------- settings & backup ----------
 function setting(id, key, min, scale = 1) {
