@@ -59,8 +59,12 @@ button:disabled { opacity: .5; cursor: default; }
 .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .med { border-top: 1px solid var(--line); padding: 12px 0; }
 .med:first-child { border-top: none; padding-top: 4px; }
-.med-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-.med-name { font-weight: 700; min-width: 0; }
+.med-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.med-name { font-weight: 700; min-width: 0; flex: 1; }
+/* Status chip and Edit counts stay together on the right, even beside a long name. */
+.med-tools { flex-shrink: 0; display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+.med-tools .chip { font-size: .7rem; padding: 2px 7px; }
+.med-tools button.link { font-size: .85rem; padding: 4px; }
 .chip { display: inline-block; font-size: .8rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
 .chip.ok { background: var(--ok-bg); color: var(--ok); }
 .chip.warn { background: var(--warn-bg); color: var(--warn); }
@@ -506,7 +510,7 @@ function render() {
     <div class="med">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
-        <span><span class="chip ${CHIP[p.level]}">${labels[p.level]}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
+        <span class="med-tools"><span class="chip ${CHIP[p.level]}">${labels[p.level]}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
       </div>
       <div class="muted">${dose(m)}</div>
       <div class="stats">
@@ -520,7 +524,7 @@ function render() {
     <div class="med paused">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
-        <span><span class="chip paused">${chip}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
+        <span class="med-tools"><span class="chip paused">${chip}</span> <button class="link" data-edit="${m.id}">Edit counts</button></span>
       </div>
       <div class="muted">${pills(m.stock)} loose at home</div>
     </div>`).join("");
