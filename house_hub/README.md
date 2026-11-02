@@ -10,7 +10,7 @@ and big buttons along the bottom for the sub-apps:
 | App | What it does |
 |---|---|
 | 📅 **Calendar** | Month view plus a day list. **Two-way Google Calendar sync**: Google events show here, and events added here go into Google. Events are tagged Jess / Graham / Both. |
-| 🛒 **Groceries** | Shared shopping list. Tick an item and it's removed (with Undo). Items you buy often appear under *Buy again*. **Meals**: save a meal with its ingredients, then tap **+ Add to list** to put them all on the list. |
+| 🛒 **Groceries** | Shared shopping list. Adding something that's already there bumps it to ×2, ×3… (or use − / +). Tick an item and it's removed (with Undo). Items you buy often appear under *Buy again*. **Meals**: save a meal with its ingredients, then tap **+ Add to list** to put them all on the list. |
 | ✅ **To-Do** | Tasks with an owner (Jess / Graham / Together) and an optional due date. |
 | 📹 **Cameras** | Ring doorbell and LSC garage camera (see the camera section below). |
 | 📋 **Daily Checklist** | Separate lists for Jess, Graham and Together. They reset every day and show the last 7 days. Tap **Edit list** to change the items. |
@@ -141,13 +141,17 @@ it to the app. That's [go2rtc](https://github.com/AlexxIT/go2rtc): free, small, 
 runs on a Raspberry Pi, a NAS, an always-on PC/Mac, or as a Home Assistant add-on.
 
 ### Step 1: Install go2rtc on an always-on device
-Pick one:
+It can't run on the wall iPad: iOS doesn't let apps run background servers. Pick one of these:
 - **Raspberry Pi / NAS / Linux with Docker:**
   ```bash
   mkdir -p ~/go2rtc && docker run -d --name go2rtc --network host --restart unless-stopped -v ~/go2rtc:/config alexxit/go2rtc
   ```
 - **Home Assistant:** go to Settings → Add-ons → Add-on store → ⋮ → Repositories, add
   `https://github.com/AlexxIT/hassio-addons`, then install **go2rtc** and start it.
+- **An old Android phone, left plugged in:** install **Termux** from F-Droid, then run
+  `pkg install go2rtc` (or download the `linux_arm64` build from the releases page) and start
+  `go2rtc`. Turn on Termux's wake lock and switch off battery optimisation for Termux so
+  Android doesn't stop it.
 - **Windows / Mac:** download go2rtc for your system from
   <https://github.com/AlexxIT/go2rtc/releases> and run it. It creates `go2rtc.yaml` next to itself.
 

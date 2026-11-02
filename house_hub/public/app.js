@@ -99,7 +99,14 @@
         // Old format: { name: count }
         hist = Object.keys(hist).map(function (n) { return { name: n, count: v.history[n] }; });
       }
-      return { items: arr(v.items).filter(function (i) { return !i.done; }), history: arr(hist) };
+      var items = arr(v.items).filter(function (i) { return !i.done; }).map(function (i) {
+        i.qty = Math.max(1, parseInt(i.qty, 10) || 1);
+        i.meals = arr(i.meals);
+        if (i.meal && i.meals.indexOf(i.meal) < 0) i.meals.push(i.meal); // older format
+        delete i.meal;
+        return i;
+      });
+      return { items: items, history: arr(hist) };
     }
     if (key === 'checklists') {
       v = v || d;
@@ -563,11 +570,18 @@
     }
     g.history.push({ name: name, count: 1 });
   }
-  function onList(name) {
+  function findItem(name) {
     var items = groc().items;
-    for (var i = 0; i < items.length; i++) if (items[i].name.toLowerCase() === name.toLowerCase()) return true;
-    return false;
+    for (var i = 0; i < items.length; i++) if (items[i].name.toLowerCase() === name.toLowerCase()) return items[i];
+    return null;
   }
+  function onList(name) { return !!findItem(name); }
+  function mealSummary(meals) {
+    var counts = {}, order = [];
+    meals.forEach(function (m) { if (!counts[m]) { counts[m] = 0; order.push(m); } counts[m]++; });
+    return order.map(function (m) { return m + (counts[m] > 1 ? ' \u00d7' + counts[m] : ''); }).join(', ');
+  }
+  function qtyLabel(i) { return i.qty > 1 ? ' \u00d7' + i.qty : ''; }
   function findMeal(id) { var m = Store.data.meals; for (var i = 0; i < m.length; i++) if (m[i].id === id) return m[i]; return null; }
 
   var Toast = {
@@ -612,7 +626,10 @@
         open.slice().sort(function (a, b) { return a.added - b.added; }).forEach(function (i) {
           h += '<div class="row flex center" data-action="groc-tick" data-id="' + i.id + '">' +
             '<div class="check"></div><div class="text grow">' + esc(i.name) +
-            (i.meal ? '<div class="meta">for ' + esc(i.meal) + '</div>' : '') + '</div></div>';
+            (i.qty > 1 ? ' <span class="qty">\u00d7' + i.qty + '</span>' : '') +
+            (i.meals.length ? '<div class="meta">for ' + esc(mealSummary(i.meals)) + '</div>' : '') + '</div>' +
+            (i.qty > 1 ? '<button class="btn small" data-action="groc-less" data-id="' + i.id + '" style="margin-right:6px">\u2212</button>' : '') +
+            '<button class="btn small" data-action="groc-more" data-id="' + i.id + '">+</button></div>';
         });
         $('groc-list').innerHTML = h + '</div>';
         var favs = g.history.filter(function (x) { return !onList(x.name); })
@@ -625,14 +642,12 @@
         var mh = '';
         if (!meals.length) mh = '<div class="list"><div class="list-empty">No meals yet.<br><br><button class="btn primary" data-action="meal-new">+ Create meal</button></div></div>';
         else {
-          mh = '<p class="muted small" style="margin-top:0">Tap <b>Add to list</b> to put a meal’s ingredients on the shopping list. Anything already on the list isn’t added twice.</p><div class="list">';
+          mh = '<p class="muted small" style="margin-top:0">Tap <b>Add to list</b> to put a meal’s ingredients on the shopping list. If an ingredient is already there, its amount goes up (×2, ×3…).</p><div class="list">';
           meals.forEach(function (m) {
-            var missing = m.ingredients.filter(function (x) { return !onList(x); }).length;
             mh += '<div class="row flex center"><div class="text grow" data-action="meal-edit" data-id="' + m.id + '">' +
               '<div><b>' + esc(m.name) + '</b></div><div class="meta">' + esc(m.ingredients.join(', ')) + '</div></div>' +
               '<button class="btn small" data-action="meal-edit" data-id="' + m.id + '" style="margin-right:8px">Edit</button>' +
-              (missing ? '<button class="btn primary small" data-action="meal-add" data-id="' + m.id + '">+ Add to list</button>'
-                : '<span class="muted small" style="padding:0 6px">✓ On list</span>') +
+              '<button class="btn primary small" data-action="meal-add" data-id="' + m.id + '">+ Add to list</button>' +
               '</div>';
           });
           mh += '</div>';
@@ -640,11 +655,29 @@
         $('groc-view-meals').innerHTML = mh;
       }
     },
+    // Adding something already on the list bumps its amount instead of
+    // ignoring it, so two meals that both need onions give "Onion ×2".
     add: function (name, meal) {
       name = name.trim();
-      if (!name || onList(name)) return false;
-      groc().items.push({ id: uid(), name: name, done: false, added: Date.now(), meal: meal || '' });
-      return true;
+      if (!name) return null;
+      var item = findItem(name);
+      if (item) item.qty++;
+      else { item = { id: uid(), name: name, qty: 1, meals: [], added: Date.now() }; groc().items.push(item); }
+      if (meal) item.meals.push(meal);
+      return item;
+    },
+    // Undo puts the list back exactly as it was before the change.
+    undoable: function (text, change) {
+      var before = JSON.stringify(groc().items);
+      change();
+      Store.save('groceries');
+      Toast.show(text, function () { groc().items = JSON.parse(before); Store.save('groceries'); });
+    },
+    addOne: function (name) {
+      if (!name.trim()) return;
+      var item;
+      this.undoable('', function () { item = Apps.groceries.add(name); });
+      Toast.show(item.qty > 1 ? item.name + ' \u00d7' + item.qty + ' on the list' : 'Added ' + item.name, Toast.undo);
     },
     mealEditor: function (m) {
       var isNew = !m;
@@ -668,10 +701,20 @@
       'groc-view': function (el) { Apps.groceries.view = el.getAttribute('data-v'); },
       'groc-add': function () {
         var el = $('groc-input');
-        if (Apps.groceries.add(el.value)) Store.save('groceries');
+        Apps.groceries.addOne(el.value);
         el.value = '';
       },
-      'groc-quick': function (el) { if (Apps.groceries.add(el.getAttribute('data-name'))) Store.save('groceries'); },
+      'groc-quick': function (el) { Apps.groceries.addOne(el.getAttribute('data-name')); },
+      'groc-more': function (el) {
+        var id = el.getAttribute('data-id');
+        groc().items.forEach(function (i) { if (i.id === id) i.qty++; });
+        Store.save('groceries');
+      },
+      'groc-less': function (el) {
+        var id = el.getAttribute('data-id');
+        groc().items.forEach(function (i) { if (i.id === id && i.qty > 1) i.qty--; });
+        Store.save('groceries');
+      },
       'groc-tick': function (el) {
         var id = el.getAttribute('data-id'), g = groc(), removed = null, at = -1;
         for (var i = 0; i < g.items.length; i++) if (g.items[i].id === id) { removed = g.items[i]; at = i; }
@@ -679,7 +722,7 @@
         g.items.splice(at, 1);
         bumpHistory(removed.name);
         Store.save('groceries');
-        Toast.show('Got ' + removed.name, function () {
+        Toast.show('Got ' + removed.name + qtyLabel(removed), function () {
           if (onList(removed.name)) return;
           groc().items.push(removed);
           Store.save('groceries');
@@ -697,15 +740,12 @@
       'meal-add': function (el) {
         var m = findMeal(el.getAttribute('data-id'));
         if (!m) return;
-        var added = [];
-        m.ingredients.forEach(function (x) { if (Apps.groceries.add(x, m.name)) added.push(x); });
-        if (!added.length) return Toast.show('Everything for ' + m.name + ' is already on the list');
-        Store.save('groceries');
-        Toast.show('Added ' + added.length + ' item' + (added.length > 1 ? 's' : '') + ' for ' + m.name, function () {
-          var g = groc();
-          g.items = g.items.filter(function (i) { return !(i.meal === m.name && added.indexOf(i.name) >= 0); });
-          Store.save('groceries');
+        var bumped = 0;
+        Apps.groceries.undoable('', function () {
+          m.ingredients.forEach(function (x) { if (Apps.groceries.add(x, m.name).qty > 1) bumped++; });
         });
+        var n = m.ingredients.length;
+        Toast.show('Added ' + n + ' item' + (n > 1 ? 's' : '') + ' for ' + m.name + (bumped ? ' (' + bumped + ' already on the list, now ×2+)' : ''), Toast.undo);
       }
     }
   };
@@ -1239,7 +1279,7 @@
     }
 
     var gi = groc().items.filter(function (i) { return !i.done; });
-    if (gi.length) out.push({ cls: 'ok', icon: '🛒', app: 'groceries', title: gi.length + ' item' + (gi.length > 1 ? 's' : '') + ' on the shopping list', sub: gi.slice(0, 6).map(function (i) { return i.name; }).join(', ') });
+    if (gi.length) out.push({ cls: 'ok', icon: '🛒', app: 'groceries', title: gi.length + ' item' + (gi.length > 1 ? 's' : '') + ' on the shopping list', sub: gi.slice(0, 6).map(function (i) { return i.name + qtyLabel(i); }).join(', ') });
     return out;
   }
 
