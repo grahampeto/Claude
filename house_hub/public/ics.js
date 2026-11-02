@@ -1,7 +1,8 @@
+(function (root) {
 'use strict';
 // Minimal iCalendar (.ics) parser: VEVENTs with all-day/timed/UTC/TZID times,
 // EXDATE and a practical RRULE subset (DAILY/WEEKLY/MONTHLY/YEARLY, INTERVAL,
-// COUNT, UNTIL, BYDAY for weekly). TZID times are treated as server-local time.
+// COUNT, UNTIL, BYDAY for weekly). TZID times are treated as the device's local time.
 
 var DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 
@@ -178,4 +179,7 @@ function expand(events, from, to) {
   return out;
 }
 
-module.exports = { parse: parse, expand: expand, sameDay: sameDay };
+var api = { parse: parse, expand: expand, sameDay: sameDay };
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+else root.ICS = api;
+})(this);

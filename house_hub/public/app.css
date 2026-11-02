@@ -220,3 +220,42 @@ label.lbl { display: block; font-size: 14px; color: #8a94a6; margin: 4px 0 6px; 
   .app-btn .tile { width: 84px; height: 84px; line-height: 84px; font-size: 42px; }
   .clock { font-size: 72px; }
 }
+
+.gear { font-size: 26px; margin-left: 12px; padding: 4px; }
+select.field { height: 50px; }
+
+/* ---------- phones ---------- */
+@media (max-width: 600px) {
+  body { font-size: 16px; }
+  #home { padding: 14px 14px 0; }
+  .clock { font-size: 52px; letter-spacing: -1px; }
+  .date { font-size: 17px; }
+  .home-title h1 { font-size: 18px; }
+  .progress-card { padding: 10px 12px; margin-right: 6px; }
+  .progress-card .name { font-size: 15px; }
+  .notif { padding: 12px; }
+  .notif .icon { font-size: 22px; width: 32px; }
+  .notif .title { font-size: 17px; }
+  .notif .sub { font-size: 14px; }
+  .dock { margin: 0 -14px; padding: 10px 4px 18px; }
+  .app-btn { width: 20%; }
+  .app-btn .tile { width: 54px; height: 54px; line-height: 54px; font-size: 28px; border-radius: 15px; margin-bottom: 4px; }
+  .app-btn .label { font-size: 11px; }
+  .badge { min-width: 22px; height: 22px; line-height: 22px; font-size: 12px; padding: 0 5px; top: -5px; right: -5px; }
+  .panel-head { height: 58px; padding: 0 8px; }
+  .panel-head h2 { font-size: 19px; }
+  .back { font-size: 17px; min-width: 84px; }
+  .head-right { min-width: 84px; }
+  .panel-body { padding: 14px 12px 40px; }
+  .row .text { font-size: 17px; }
+  .field { font-size: 17px; }
+  .cal-cell { height: 48px; padding: 3px; margin: 1px; }
+  .cal-cell .num { font-size: 13px; min-width: 22px; height: 22px; line-height: 22px; }
+  .dot { width: 6px; height: 6px; margin: 0 2px 2px 0; }
+  .tab { padding: 10px 2px; font-size: 14px; }
+  .modal-bg { padding-top: 30px; }
+  .progress-card .between { display: block; }
+  .progress-card .muted { font-size: 13px; }
+  .cal-nav h3 { font-size: 18px; }
+  .cal-nav .btn { padding: 8px 12px; font-size: 16px; }
+}

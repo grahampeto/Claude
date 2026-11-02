@@ -61,89 +61,243 @@
   function whoTag(w) { var x = WHO[w]; return x ? '<span class="who ' + x.cls + '">' + x.label + '</span>' : ''; }
 
   // ------------------------------------------------------------------ store
-  // Shared state lives on the server; a copy is cached in localStorage so the
-  // app still works (and shows the last data) if the server is unreachable.
+  // No server of our own. Data is kept in localStorage on each device and, if
+  // sync is set up, mirrored to a Firebase Realtime Database through its REST
+  // API (plain XHR + EventSource, so it works on old iOS). Each top-level key
+  // is written on its own so two devices editing different lists never clash.
+  var STATE_KEYS = ['events', 'groceries', 'todos', 'notes', 'checklists', 'settings'];
+
+  function items(list) { return list.map(function (t, i) { return { id: 'd' + i, text: t }; }); }
+  function defaults() {
+    return {
+      events: [], todos: [], notes: [],
+      groceries: { items: [], history: [] },
+      checklists: {
+        jess: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
+        graham: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
+        both: { items: items(['Unload dishwasher', 'Put bins out (if bin day)', 'Lock up & alarm on']), done: {} }
+      },
+      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '' }
+    };
+  }
+  // Firebase drops empty arrays/objects and may hand arrays back as objects,
+  // so everything read from storage goes through here.
+  function arr(v) {
+    if (!v) return [];
+    if (Object.prototype.toString.call(v) === '[object Array]') return v.filter(function (x) { return x != null; });
+    return Object.keys(v).map(function (k) { return v[k]; });
+  }
+  function normalize(key, v) {
+    var d = defaults()[key];
+    if (key === 'events' || key === 'todos' || key === 'notes') return arr(v);
+    if (key === 'groceries') {
+      v = v || {};
+      if (Object.prototype.toString.call(v) === '[object Array]') v = { items: v };
+      var hist = v.history || [];
+      if (Object.prototype.toString.call(hist) !== '[object Array]' && typeof hist === 'object' && !hist[0]) {
+        // Old format: { name: count }
+        hist = Object.keys(hist).map(function (n) { return { name: n, count: v.history[n] }; });
+      }
+      return { items: arr(v.items), history: arr(hist) };
+    }
+    if (key === 'checklists') {
+      v = v || d;
+      var out = {};
+      ['jess', 'graham', 'both'].forEach(function (w) {
+        var c = v[w] || { items: [] };
+        out[w] = {
+          items: arr(c.items).map(function (it, i) { return typeof it === 'string' ? { id: 'm' + i, text: it } : it; }),
+          done: c.done || {}
+        };
+      });
+      return out;
+    }
+    if (key === 'settings') {
+      v = v || {};
+      return { title: v.title || d.title, calendars: arr(v.calendars), cameras: arr(v.cameras), corsProxy: v.corsProxy || '' };
+    }
+    return v;
+  }
+  function clone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
+
   var Store = {
     data: null,
-    rev: 0,
     dirty: {},
+    inflight: {},
     online: false,
+    sync: null,           // { db: 'https://xxx.firebasedatabase.app', key: 'household key' }
+    remote: null,         // mirror of the server copy, built from the event stream
+    es: null,
+    pollTimer: null,
     listeners: [],
     calendar: { events: [], errors: [] },
 
     init: function () {
-      var cached = lsGet('househub.state', null);
-      this.data = cached || {
-        events: [], groceries: { items: [], history: {} }, todos: [], notes: [],
-        checklists: {
-          jess: { items: [], done: {} }, graham: { items: [], done: {} }, both: { items: [], done: {} }
-        }
-      };
+      var cached = lsGet('househub.state', null) || {};
+      this.data = {};
+      for (var i = 0; i < STATE_KEYS.length; i++) {
+        var k = STATE_KEYS[i];
+        this.data[k] = k in cached ? normalize(k, cached[k]) : defaults()[k];
+      }
       this.dirty = lsGet('househub.dirty', {});
-      this.rev = lsGet('househub.rev', 0);
-      this.pull();
-      this.pullCalendar();
+      this.sync = lsGet('househub.sync', null);
+      this.connect();
       var self = this;
-      setInterval(function () { self.flush(); self.pull(); }, 10000);
-      setInterval(function () { self.pullCalendar(); }, 5 * 60000);
+      setInterval(function () { self.flush(); }, 15000);
+      this.pullCalendar();
+      setInterval(function () { self.pullCalendar(); }, 10 * 60000);
     },
     onChange: function (fn) { this.listeners.push(fn); },
     emit: function () { for (var i = 0; i < this.listeners.length; i++) this.listeners[i](); },
-    cache: function () {
-      lsSet('househub.state', this.data);
-      lsSet('househub.dirty', this.dirty);
-      lsSet('househub.rev', this.rev);
+    cache: function () { lsSet('househub.state', this.data); lsSet('househub.dirty', this.dirty); },
+    baseUrl: function () {
+      if (!this.sync || !this.sync.db || !this.sync.key) return null;
+      return this.sync.db.replace(/\/+$/, '') + '/homes/' + encodeURIComponent(this.sync.key);
     },
-    pull: function () {
+
+    setSync: function (sync) {
+      this.sync = sync && sync.db && sync.key ? sync : null;
+      lsSet('househub.sync', this.sync);
+      this.dirty = {};          // joining a household: take its data, don't overwrite it
+      this.cache();
+      this.connect();
+    },
+
+    connect: function () {
       var self = this;
-      ajax('GET', '/api/state?since=' + this.rev, null, function (err, res) {
-        self.online = !err;
-        if (!err && res && !res.unchanged) {
-          for (var k in res) {
-            if (k !== 'rev' && res.hasOwnProperty(k) && !self.dirty[k]) self.data[k] = res[k];
-          }
-          self.rev = res.rev;
-          self.cache();
+      if (this.es) { this.es.close(); this.es = null; }
+      clearInterval(this.pollTimer);
+      this.remote = null;
+      this.online = false;
+      var base = this.baseUrl();
+      if (!base) { this.emit(); return; }
+      if (window.EventSource) {
+        var es = this.es = new EventSource(base + '.json');
+        es.addEventListener('put', function (e) { self.online = true; var m = JSON.parse(e.data); self.applyRemote(m.path, m.data); });
+        es.addEventListener('patch', function (e) {
+          self.online = true;
+          var m = JSON.parse(e.data);
+          for (var k in m.data) if (m.data.hasOwnProperty(k)) self.applyRemote(m.path.replace(/\/$/, '') + '/' + k, m.data[k]);
+        });
+        es.addEventListener('cancel', function () { self.online = false; self.emit(); });
+        es.onopen = function () { self.online = true; self.flush(); self.emit(); };
+        es.onerror = function () { self.online = false; self.emit(); };
+      } else {
+        var poll = function () {
+          ajax('GET', base + '.json', null, function (err, res) {
+            self.online = !err;
+            if (!err) self.applyRemote('/', res);
+            else self.emit();
+          });
+        };
+        poll();
+        this.pollTimer = setInterval(poll, 10000);
+      }
+    },
+
+    applyRemote: function (path, value) {
+      var parts = path.split('/').filter(function (p) { return p; });
+      var first = this.remote === null;
+      if (!parts.length) this.remote = value || {};
+      else {
+        if (!this.remote) this.remote = {};
+        var o = this.remote;
+        for (var i = 0; i < parts.length - 1; i++) {
+          if (!o[parts[i]] || typeof o[parts[i]] !== 'object') o[parts[i]] = {};
+          o = o[parts[i]];
         }
-        self.emit();
-      });
+        if (value === null) delete o[parts[parts.length - 1]];
+        else o[parts[parts.length - 1]] = value;
+      }
+      var touched = parts.length ? [parts[0]] : STATE_KEYS;
+      for (var j = 0; j < touched.length; j++) {
+        var k = touched[j];
+        if (STATE_KEYS.indexOf(k) < 0) continue;
+        if (first && !(k in this.remote)) { this.dirty[k] = true; continue; } // new household: upload ours
+        if (!this.dirty[k]) this.data[k] = normalize(k, clone(this.remote[k]));
+      }
+      this.cache();
+      if (first) this.flush();
+      if (touched.indexOf('settings') >= 0) this.pullCalendar();
+      this.emit();
     },
-    pullCalendar: function () {
-      var self = this;
-      ajax('GET', '/api/calendar', null, function (err, res) {
-        if (!err && res) { self.calendar = res; self.emit(); }
-      });
-    },
+
     // Call after mutating Store.data[key].
     save: function (key) {
       this.dirty[key] = true;
       this.cache();
       this.emit();
       this.flush();
+      if (key === 'settings') this.pullCalendar();
     },
-    inflight: {},
     flush: function () {
-      var self = this;
+      var self = this, base = this.baseUrl();
+      if (!base) return;
       Object.keys(this.dirty).forEach(function (key) {
         if (self.inflight[key]) return;
         self.inflight[key] = true;
-        var sentValue = JSON.stringify(self.data[key]);
-        ajax('PUT', '/api/state/' + key, { value: self.data[key] }, function (err, res) {
+        var sent = JSON.stringify(self.data[key]);
+        ajax('PUT', base + '/' + key + '.json', self.data[key], function (err) {
           self.inflight[key] = false;
-          self.online = !err;
-          if (err) return self.emit();
+          if (err) { self.online = false; return self.emit(); }
           // Only clear the flag if nothing changed while the request was in flight.
-          if (JSON.stringify(self.data[key]) === sentValue) delete self.dirty[key];
+          if (JSON.stringify(self.data[key]) === sent) delete self.dirty[key];
           else setTimeout(function () { self.flush(); }, 0);
-          if (res && res.rev === self.rev + 1) self.rev = res.rev; // otherwise next pull fetches others' changes
           self.cache();
           self.emit();
         });
       });
+    },
+
+    // Calendar feeds are fetched by the browser. Google/iCloud don't allow
+    // that (no CORS headers), so a CORS proxy can be set in Settings.
+    pullCalendar: function () {
+      var self = this, s = this.data.settings;
+      var feeds = s.calendars.filter(function (c) { return c.url; });
+      if (!feeds.length) { this.calendar = { events: [], errors: [] }; return; }
+      var now = new Date();
+      var from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      var to = new Date(now.getFullYear(), now.getMonth() + 4, 1);
+      var all = [], errors = [], pending = feeds.length;
+      feeds.forEach(function (feed) {
+        var u = feed.url.trim().replace(/^webcal:/i, 'https:');
+        if (s.corsProxy) u = s.corsProxy.indexOf('{url}') >= 0 ? s.corsProxy.replace('{url}', encodeURIComponent(u)) : s.corsProxy + encodeURIComponent(u);
+        var x = new XMLHttpRequest();
+        x.open('GET', u, true);
+        x.timeout = 20000;
+        x.onreadystatechange = function () {
+          if (x.readyState !== 4) return;
+          if (x.status === 200 && x.responseText.indexOf('BEGIN:VCALENDAR') >= 0) {
+            try {
+              ICS.expand(ICS.parse(x.responseText), from, to).forEach(function (ev) {
+                ev.calendar = feed.name || ''; ev.color = feed.color || ''; all.push(ev);
+              });
+            } catch (e) { errors.push((feed.name || 'Calendar') + ': could not read feed'); }
+          } else {
+            errors.push((feed.name || 'Calendar') + ': ' + (x.status === 0
+              ? 'blocked by the browser – set a CORS proxy in Settings'
+              : 'HTTP ' + x.status));
+          }
+          if (--pending === 0) { self.calendar = { events: all, errors: errors }; self.emit(); }
+        };
+        x.send(null);
+      });
     }
   };
 
-  var Config = { title: 'Our Home', cameras: [] };
+  // Settings that belong to this device only (not shared).
+  var Device = {
+    get: function () {
+      var d = lsGet('househub.device', null);
+      if (!d) {
+        // Tablets default to "wall display" (auto-home + night dimming); phones don't.
+        var short = Math.min(window.screen.width, window.screen.height);
+        d = { wall: short >= 700 };
+      }
+      return d;
+    },
+    set: function (d) { lsSet('househub.device', d); }
+  };
 
   // ------------------------------------------------------------------ modal
   var Modal = {
@@ -283,12 +437,7 @@
   };
 
   // ---- Groceries ------------------------------------------------------------
-  function groc() {
-    var g = Store.data.groceries;
-    if (!g || Object.prototype.toString.call(g) === '[object Array]') g = Store.data.groceries = { items: g || [], history: {} };
-    if (!g.history) g.history = {};
-    return g;
-  }
+  function groc() { return Store.data.groceries; }
   Apps.groceries = {
     title: 'Groceries',
     headerActions: '<button class="btn small" data-action="groc-clear">Clear ticked</button>',
@@ -301,8 +450,9 @@
       var g = groc();
       var onList = {};
       g.items.forEach(function (i) { onList[i.name.toLowerCase()] = true; });
-      var favs = Object.keys(g.history).filter(function (n) { return !onList[n.toLowerCase()]; })
-        .sort(function (a, b) { return g.history[b] - g.history[a]; }).slice(0, 14);
+      var favs = g.history.filter(function (h) { return !onList[h.name.toLowerCase()]; })
+        .sort(function (a, b) { return b.count - a.count; }).slice(0, 14)
+        .map(function (h) { return h.name; });
       $('groc-chips').innerHTML = favs.length ? favs.map(function (n) {
         return '<button class="chip" data-action="groc-quick" data-name="' + esc(n) + '">+ ' + esc(n) + '</button>';
       }).join('') : '';
@@ -343,7 +493,12 @@
       },
       'groc-clear': function () {
         var g = groc();
-        g.items.forEach(function (i) { if (i.done) g.history[i.name] = (g.history[i.name] || 0) + 1; });
+        g.items.forEach(function (i) {
+          if (!i.done) return;
+          var h = null;
+          for (var j = 0; j < g.history.length; j++) if (g.history[j].name.toLowerCase() === i.name.toLowerCase()) h = g.history[j];
+          if (h) h.count++; else g.history.push({ name: i.name, count: 1 });
+        });
         g.items = g.items.filter(function (i) { return !i.done; });
         Store.save('groceries');
       }
@@ -425,15 +580,20 @@
   };
 
   // ---- Cameras ---------------------------------------------------------------
+  function cameras() {
+    return Store.data.settings.cameras.map(function (c, i) {
+      return { id: i, name: c.name, type: c.type || 'mjpeg', url: c.url, refreshSeconds: c.refreshSeconds || 2 };
+    });
+  }
   // Streams only run while this screen is open (saves Wi-Fi and Ring battery).
   Apps.cameras = {
     title: 'Cameras',
     timers: [],
     headerActions: '<button class="btn small" data-action="cam-reload">Reload</button>',
     shell: function () {
-      var cams = Config.cameras;
+      var cams = cameras();
       if (!cams.length) {
-        return '<div class="list"><div class="list-empty">No cameras configured yet.<br>Add them to <b>config.json</b> on the server (see README).</div></div>';
+        return '<div class="list"><div class="list-empty">No cameras set up yet.<br><br><button class="btn primary" data-action="open" data-app="settings">Open Settings</button></div></div>';
       }
       var h = '<div class="cams flex wrap">';
       cams.forEach(function (c) {
@@ -454,14 +614,16 @@
       this.stop();
       var imgs = root.querySelectorAll('img.cam-media');
       for (var i = 0; i < imgs.length; i++) (function (img) {
-        var cam = Config.cameras[+img.getAttribute('data-cam')];
+        var cam = cameras()[+img.getAttribute('data-cam')];
         var base = img.getAttribute('data-src');
         function bust() { return base + (base.indexOf('?') < 0 ? '?' : '&') + '_=' + Date.now(); }
         img.onerror = function () {
           if (!img.parentNode || img.parentNode.querySelector('.cam-err')) return;
           var e = document.createElement('div');
           e.className = 'cam-err';
-          e.textContent = 'Camera offline – tap Reload';
+          e.textContent = location.protocol === 'https:' && /^http:/.test(base)
+            ? 'Can\u2019t load – this browser blocks http:// cameras on an https page (see README)'
+            : 'Camera offline – tap Reload';
           img.parentNode.appendChild(e);
         };
         img.src = bust();
@@ -493,7 +655,7 @@
     actions: {
       'cam-reload': function () { $('panel-body').innerHTML = Apps.cameras.shell(); Apps.cameras.start($('panel-body')); },
       'cam-full': function (el) {
-        var c = Config.cameras[+el.getAttribute('data-id')];
+        var c = cameras()[+el.getAttribute('data-id')];
         Apps.cameras.stop();
         var div = document.createElement('div');
         div.className = 'cam-full';
@@ -606,6 +768,140 @@
     }
   };
 
+  // ---- Settings ---------------------------------------------------------------
+  function randomKey() {
+    var chars = 'abcdefghijkmnpqrstuvwxyz23456789', out = '';
+    var buf = window.crypto && window.crypto.getRandomValues ? window.crypto.getRandomValues(new Uint8Array(24)) : null;
+    for (var i = 0; i < 24; i++) out += chars[(buf ? buf[i] : Math.floor(Math.random() * 256)) % chars.length];
+    return out;
+  }
+  function joinLink() {
+    if (!Store.sync) return '';
+    return location.href.split('#')[0] + '#join=' + encodeURIComponent(JSON.stringify(Store.sync));
+  }
+  var COLORS = [['#4f8cff', 'Blue'], ['#e86fa8', 'Pink'], ['#3fbf7f', 'Green'], ['#f5a623', 'Orange'], ['#7b61ff', 'Purple']];
+  function colorSelect(id) {
+    return '<select class="field" id="' + id + '">' + COLORS.map(function (c) { return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') + '</select>';
+  }
+
+  Apps.settings = {
+    title: 'Settings',
+    shell: function () {
+      var sync = Store.sync || {}, s = Store.data.settings, dev = Device.get();
+      return '' +
+        '<div class="section-label">Sync between devices</div>' +
+        '<div class="list" style="padding:16px">' +
+        '<p class="muted small" style="margin-top:0">Optional. Without it, everything is saved on this device only. Set up a free Firebase Realtime Database (see README), paste its URL, make a household key, then send the setup link to your other devices.</p>' +
+        '<label class="lbl">Firebase database URL</label><input class="field" id="set-db" placeholder="https://your-project-default-rtdb.europe-west1.firebasedatabase.app" value="' + esc(sync.db || '') + '" autocapitalize="off" autocorrect="off">' +
+        '<label class="lbl" style="margin-top:12px">Household key (acts as your password – keep it secret)</label>' +
+        '<div class="flex"><input class="field grow" id="set-key" value="' + esc(sync.key || '') + '" autocapitalize="off" autocorrect="off" style="margin-right:10px">' +
+        '<button class="btn" data-action="set-genkey">New key</button></div>' +
+        '<div class="flex wrap" style="margin-top:14px"><button class="btn primary" data-action="set-sync" style="margin:0 10px 10px 0">Save &amp; connect</button>' +
+        '<button class="btn" data-action="set-share" style="margin:0 10px 10px 0">Share setup link</button>' +
+        '<button class="btn danger" data-action="set-unsync" style="margin:0 10px 10px 0">Stop syncing</button></div>' +
+        '<div id="set-status" class="small"></div>' +
+        '<textarea class="field hidden" id="set-link" rows="3" readonly style="margin-top:10px;font-size:14px"></textarea>' +
+        '</div>' +
+
+        '<div class="section-label">Home screen</div>' +
+        '<div class="list" style="padding:16px">' +
+        '<label class="lbl">Title</label><div class="flex"><input class="field grow" id="set-title" value="' + esc(s.title) + '" style="margin-right:10px"><button class="btn" data-action="set-title">Save</button></div>' +
+        '<div class="row flex center" data-action="set-wall" style="padding:14px 0 0;border:0;min-height:0"><div class="check' + (dev.wall ? ' on' : '') + '" id="set-wall-check">' + (dev.wall ? '✓' : '') + '</div>' +
+        '<div class="text grow">This device is the wall display<div class="meta">Goes back home after 3 idle minutes and dims 23:00–06:00. Only affects this device.</div></div></div>' +
+        '</div>' +
+
+        '<div class="section-label">Calendars (.ics feeds)</div>' +
+        '<div id="set-cals"></div>' +
+        '<form class="list" style="padding:16px" data-form="set-addcal">' +
+        '<label class="lbl">Name</label><input class="field" id="cal-name" placeholder="Family">' +
+        '<label class="lbl" style="margin-top:10px">Secret iCal address (Google: Settings → Integrate calendar)</label><input class="field" id="cal-url" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" autocapitalize="off" autocorrect="off">' +
+        '<label class="lbl" style="margin-top:10px">Colour</label>' + colorSelect('cal-color') +
+        '<button class="btn primary" type="submit" style="margin-top:12px">Add calendar</button>' +
+        '<label class="lbl" style="margin-top:18px">CORS proxy (needed for Google &amp; iCloud feeds – see README)</label>' +
+        '<div class="flex"><input class="field grow" id="set-proxy" placeholder="https://my-proxy.workers.dev/?url=" value="' + esc(s.corsProxy) + '" autocapitalize="off" autocorrect="off" style="margin-right:10px">' +
+        '<button class="btn" type="button" data-action="set-proxy">Save</button></div>' +
+        '</form>' +
+
+        '<div class="section-label">Cameras</div>' +
+        '<div id="set-cams"></div>' +
+        '<form class="list" style="padding:16px" data-form="set-addcam">' +
+        '<label class="lbl">Name</label><input class="field" id="cam-name" placeholder="Front door (Ring)">' +
+        '<label class="lbl" style="margin-top:10px">Type</label><select class="field" id="cam-type">' +
+        '<option value="mjpeg">MJPEG stream (best for old iPads)</option><option value="hls">HLS video (.m3u8)</option>' +
+        '<option value="snapshot">Snapshot image, refreshed every 2s</option><option value="iframe">Web page</option></select>' +
+        '<label class="lbl" style="margin-top:10px">Stream URL</label><input class="field" id="cam-url" placeholder="http://192.168.1.10:1984/api/stream.mjpeg?src=garage" autocapitalize="off" autocorrect="off">' +
+        '<button class="btn primary" type="submit" style="margin-top:12px">Add camera</button>' +
+        '</form>';
+    },
+    render: function () {
+      var st = $('set-status');
+      if (!st) return;
+      if (!Store.sync) { st.className = 'small muted'; st.textContent = 'Not syncing – data stays on this device.'; }
+      else if (Store.online) { st.className = 'small sync ok'; st.textContent = '● Connected – changes sync to every device with this key.'; }
+      else { st.className = 'small sync bad'; st.textContent = '● Can’t reach the database. Check the URL and the database rules (see README).'; }
+
+      var s = Store.data.settings;
+      $('set-cals').innerHTML = s.calendars.length ? '<div class="list">' + s.calendars.map(function (c, i) {
+        return '<div class="row flex center"><span class="dot" style="width:16px;height:16px;border-radius:8px;background:' + esc(c.color) + '"></span>' +
+          '<div class="text grow">' + esc(c.name) + '<div class="meta">' + esc(c.url) + '</div></div>' +
+          '<button class="del" data-action="set-delcal" data-i="' + i + '">✕</button></div>';
+      }).join('') + '</div>' : '';
+      if (Store.calendar.errors.length) $('set-cals').innerHTML += '<p class="small overdue">' + esc(Store.calendar.errors.join(' · ')) + '</p>';
+      $('set-cams').innerHTML = s.cameras.length ? '<div class="list">' + s.cameras.map(function (c, i) {
+        return '<div class="row flex center"><div class="text grow">' + esc(c.name) + '<div class="meta">' + esc(c.type) + ' · ' + esc(c.url) + '</div></div>' +
+          '<button class="del" data-action="set-delcam" data-i="' + i + '">✕</button></div>';
+      }).join('') + '</div>' : '';
+    },
+    actions: {
+      'set-genkey': function () {
+        if ($('set-key').value && !confirm('Make a new key? Devices using the old key will stop syncing with this one.')) return;
+        $('set-key').value = randomKey();
+      },
+      'set-sync': function () {
+        var db = $('set-db').value.trim().replace(/\/+$/, ''), key = $('set-key').value.trim();
+        if (!/^https:\/\/.+/.test(db)) return alert('The database URL should start with https://');
+        if (key.length < 16) return alert('Use a household key of at least 16 characters (tap “New key”).');
+        Store.setSync({ db: db, key: key });
+      },
+      'set-unsync': function () {
+        if (!Store.sync || !confirm('Stop syncing on this device? Your data stays here; other devices are not affected.')) return;
+        Store.setSync(null);
+        $('set-db').value = ''; $('set-key').value = '';
+      },
+      'set-share': function () {
+        var link = joinLink();
+        if (!link) return alert('Save & connect first.');
+        if (navigator.share) { navigator.share({ title: 'House Hub setup', text: 'Open this to connect House Hub:', url: link }); return; }
+        var t = $('set-link');
+        t.className = 'field'; t.value = link; t.focus(); t.select();
+        try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+      },
+      'set-title': function () { Store.data.settings.title = $('set-title').value.trim() || 'Our Home'; Store.save('settings'); },
+      'set-proxy': function () { Store.data.settings.corsProxy = $('set-proxy').value.trim(); Store.save('settings'); },
+      'set-wall': function () {
+        var d = Device.get(); d.wall = !d.wall; Device.set(d);
+        $('set-wall-check').className = 'check' + (d.wall ? ' on' : '');
+        $('set-wall-check').textContent = d.wall ? '✓' : '';
+      },
+      'set-addcal': function () {
+        var url = $('cal-url').value.trim();
+        if (!url) return;
+        Store.data.settings.calendars.push({ name: $('cal-name').value.trim() || 'Calendar', url: url, color: $('cal-color').value });
+        $('cal-name').value = ''; $('cal-url').value = '';
+        Store.save('settings');
+      },
+      'set-delcal': function (el) { Store.data.settings.calendars.splice(+el.getAttribute('data-i'), 1); Store.save('settings'); },
+      'set-addcam': function () {
+        var url = $('cam-url').value.trim();
+        if (!url) return;
+        Store.data.settings.cameras.push({ name: $('cam-name').value.trim() || 'Camera', type: $('cam-type').value, url: url });
+        $('cam-name').value = ''; $('cam-url').value = '';
+        Store.save('settings');
+      },
+      'set-delcam': function (el) { Store.data.settings.cameras.splice(+el.getAttribute('data-i'), 1); Store.save('settings'); }
+    }
+  };
+
   // ------------------------------------------------------------------ home
   function notifications() {
     var out = [], now = new Date(), today = dayKey(now), tomorrow = dayKey(addDays(now, 1));
@@ -657,10 +953,13 @@
   }
 
   function renderHome() {
-    $('title').textContent = Config.title;
+    $('title').textContent = Store.data.settings.title;
     var s = $('sync');
-    s.className = 'sync ' + (Store.online ? 'ok' : 'bad');
-    s.textContent = Store.online ? (Object.keys(Store.dirty).length ? '● Syncing…' : '● Synced') : '● Offline – changes saved on this iPad';
+    if (!Store.sync) { s.className = 'sync muted'; s.textContent = 'This device only'; }
+    else {
+      s.className = 'sync ' + (Store.online ? 'ok' : 'bad');
+      s.textContent = Store.online ? (Object.keys(Store.dirty).length ? '● Syncing…' : '● Synced') : '● Offline – saved on this device';
+    }
 
     $('progress').innerHTML = LISTS.map(function (l) {
       var p = checklistProgress(l[0]);
@@ -783,8 +1082,8 @@
   }, false);
 
   // ------------------------------------------------------------------ idle & night
-  // After a few idle minutes go back to the home screen (also stops camera
-  // streams). Between 23:00 and 06:00 dim the screen; a tap wakes it.
+  // Wall display only: after a few idle minutes go back to the home screen
+  // (also stops camera streams); between 23:00 and 06:00 dim the screen.
   var lastTouch = Date.now(), IDLE_MS = 3 * 60000, NIGHT_START = 23, NIGHT_END = 6;
   function poke() {
     lastTouch = Date.now();
@@ -798,6 +1097,7 @@
   $('dimmer').addEventListener('click', function (e) { e.stopPropagation(); poke(); }, false);
   setInterval(function () {
     tickClock();
+    if (!Device.get().wall) return;
     var idle = Date.now() - lastTouch;
     var focused = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
     if (current && idle > IDLE_MS && !focused) goHome();
@@ -816,10 +1116,30 @@
 
   tickClock();
   Store.init();
-  ajax('GET', '/api/config', null, function (err, cfg) {
-    if (!err && cfg) { Config = cfg; lsSet('househub.config', cfg); }
-    else Config = lsGet('househub.config', Config);
-    renderHome();
-  });
+
+  // Setup link from another device: #join=<{"db":..,"key":..}>
+  function checkJoin() {
+    var join = /#join=(.+)$/.exec(location.hash);
+    if (!join) return;
+    try {
+      var cfg = JSON.parse(decodeURIComponent(join[1]));
+      if (cfg.db && cfg.key && (!Store.sync || Store.sync.key !== cfg.key) &&
+          confirm('Connect this device to the shared House Hub?')) Store.setSync(cfg);
+    } catch (e) { /* bad link */ }
+    if (window.history && history.replaceState) history.replaceState(null, '', location.href.split('#')[0]);
+    else location.hash = '';
+  }
+  checkJoin();
+  window.addEventListener('hashchange', checkJoin, false);
+
+  // Phones drop the live connection when the browser sleeps: reconnect on wake.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && Store.sync && !Store.online) Store.connect();
+  }, false);
+
+  // Offline support / installable app (not available on very old iOS – that's fine).
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js');
+  }
   renderHome();
 })();

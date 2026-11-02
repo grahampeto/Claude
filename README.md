@@ -39,4 +39,4 @@ Not investment advice. Yahoo fundamentals can be stale or missing for some ticke
 
 ## Also in this repo
 
-- [`house_hub/`](house_hub/README.md) – home dashboard for a wall-mounted iPad (calendar, groceries, to-do, cameras, daily checklists).
+- [`house_hub/`](house_hub/README.md) – home dashboard web app for a wall-mounted iPad and phones (calendar, groceries, to-do, cameras, daily checklists). No server needed: GitHub Pages + Firebase sync.

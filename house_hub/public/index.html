@@ -10,6 +10,8 @@
 <meta name="apple-mobile-web-app-title" content="House Hub">
 <meta name="theme-color" content="#10141c">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -21,7 +23,10 @@
       <div class="date" id="date"></div>
     </div>
     <div class="home-title">
-      <h1 id="title">Our Home</h1>
+      <div class="flex center" style="-webkit-box-pack:end;-webkit-justify-content:flex-end;justify-content:flex-end">
+        <h1 id="title">Our Home</h1>
+        <button class="gear" data-action="open" data-app="settings" aria-label="Settings">⚙️</button>
+      </div>
       <div class="sync" id="sync"></div>
     </div>
   </div>
@@ -56,6 +61,7 @@
 <div id="modal-root"></div>
 <div id="dimmer" class="hidden"><div class="clock" id="dim-clock"></div></div>
 
+<script src="ics.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

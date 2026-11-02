@@ -1,113 +1,147 @@
 # House Hub
 
-A home dashboard for an old iPad on the wall. The home screen has a clock, today's
-checklist progress and notifications at the top, and big buttons along the bottom for
-the sub-apps:
+A home dashboard web app for the iPad on the wall and for your phones (Android or
+iPhone). There's no server to run: the app is a static website hosted free on
+GitHub Pages, and your lists sync between devices through a free Firebase database.
+
+The home screen has a clock, today's checklist progress and notifications at the top,
+and big buttons along the bottom for the sub-apps:
 
 | App | What it does |
 |---|---|
-| 📅 **Calendar** | Month view plus a day list. Pulls in Google/iCloud/Outlook calendars (as .ics feeds) and lets you add household events tagged Jess / Graham / Both. |
+| 📅 **Calendar** | Month view plus a day list. Add household events tagged Jess / Graham / Both, and optionally show Google/iCloud/Outlook calendars. |
 | 🛒 **Groceries** | Shared shopping list. Tick items off, then tap **Clear ticked**. Items you buy often appear as one-tap chips. |
-| ✅ **To-Do** | Tasks with an owner (Jess / Graham / Together) and an optional due date. Overdue tasks show up on the home screen. |
-| 📹 **Cameras** | Ring doorbell and LSC garage camera. Streams only run while this screen is open. |
+| ✅ **To-Do** | Tasks with an owner (Jess / Graham / Together) and an optional due date. |
+| 📹 **Cameras** | Ring doorbell and LSC garage camera (see the camera section below). |
 | 📋 **Daily Checklist** | Separate lists for Jess, Graham and Together. They reset every day and show the last 7 days. Tap **Edit list** to change the items. |
 
-**Notifications** on the home screen come from: notes you leave for each other
-(**+ Leave a note**), what's on today and tomorrow, overdue tasks or tasks due soon,
-unfinished checklists after 6pm, and how many items are on the shopping list.
+**Notifications** come from: notes you leave each other (**+ Leave a note**), what's on
+today and tomorrow, overdue tasks or tasks due soon, unfinished checklists after 6pm,
+and how many items are on the shopping list.
 
-Other things built for a wall iPad:
-- After 3 minutes without a touch it goes back to the home screen, which also stops the camera streams.
-- From 23:00 to 06:00 the screen dims. A tap wakes it.
-- It works offline. Changes are kept on the iPad and sync when the server is back.
-- Data is shared, so you can also open the hub on your phones (`http://<server>:8080`) and add groceries from the shop.
+**Wall display mode** is on by default on tablets and off on phones. You can change it
+for each device in ⚙️ Settings. With it on, the app goes back to the home screen after
+3 idle minutes and dims between 23:00 and 06:00.
 
 ## How it fits together
 
 ```
- iPad (Safari, full screen) ──►  House Hub server (node server.js, port 8080)
- phones (optional)              ├─ stores lists in data/state.json
-                                ├─ fetches calendar .ics feeds
-                                └─ camera URLs ──► go2rtc (port 1984) ──► Ring / LSC camera
+GitHub Pages (the app: HTML/JS/CSS)
+        │ loads
+        ▼
+ iPad ◄──────► Firebase Realtime Database ◄──────► Android phones
+       live sync    (free "Spark" plan)      live sync
 ```
 
-The iPad only shows the web page. The server has to run on a machine that's always on,
-such as a Raspberry Pi, a NAS, a home server or a PC that stays on. It needs Node.js 14
-or newer and has **no dependencies**.
+- Every device keeps its own copy in browser storage, so the app works with no signal and syncs once it's back online.
+- Without Firebase the app still works, but each device keeps its own separate data.
+- The code is written in plain ES5 (checked with an ES5 parser), so it also runs on iPads stuck on old iOS (iOS 9.3+).
 
-The front end is written in plain ES5 with flexbox, so it runs on iPads stuck on old iOS
-(it's designed for iOS 9.3+ and has been checked against an ES5 parser).
+## Setup (about 10 minutes, all free)
 
-## Setup
+### 1. Publish the app (GitHub Pages)
+1. On GitHub, open the repo, then **Settings → Pages**. Under *Build and deployment*, set **Source: GitHub Actions**.
+2. Go to **Actions**, open **Deploy House Hub to GitHub Pages**, then click **Run workflow** (it also runs on every push to this branch or `main`).
+3. Your app will be at **`https://grahampeto.github.io/Claude/`**.
+
+If the run says the branch isn't allowed to deploy, go to **Settings → Environments →
+github-pages** and add the branch under *Deployment branches*.
+
+### 2. Create the shared database (Firebase)
+1. Go to <https://console.firebase.google.com>, click **Create a project** (any name), and skip Google Analytics.
+2. Open **Build → Realtime Database**, then **Create database**. Choose a location (e.g. Belgium `europe-west1`) and **Start in locked mode**.
+3. Open the **Rules** tab, paste the rules below and click **Publish**:
+
+   ```json
+   {
+     "rules": {
+       ".read": false,
+       ".write": false,
+       "homes": {
+         "$home": {
+           ".read": "$home.length >= 16",
+           ".write": "$home.length >= 16"
+         }
+       }
+     }
+   }
+   ```
+4. Copy the database URL shown at the top of the *Data* tab, e.g. `https://house-hub-1234-default-rtdb.europe-west1.firebasedatabase.app`.
+
+**How private is it?** Your data sits under a random 24-character *household key*. Nobody
+can list the keys, so only someone who has your key (or your setup link) can read or
+change your lists. Treat the setup link like a password. This is fine for shopping lists
+and chores. Don't store anything sensitive.
+
+### 3. Connect the iPad
+1. Open `https://grahampeto.github.io/Claude/` in Safari.
+2. Tap ⚙️, paste the database URL, tap **New key**, then **Save & connect**. It should say *Connected*.
+3. Tap Share, then **Add to Home Screen**, and open the hub from that icon (full screen).
+4. Go to Settings, then Display & Brightness, set **Auto-Lock: Never**, and keep it plugged in. Optionally turn on **Guided Access** to lock it to the hub.
+
+### 4. Connect the phones
+1. On the iPad, go to ⚙️ and tap **Share setup link**. Send the link to each phone (WhatsApp, email…).
+2. Open the link on the phone and tap **OK** to connect.
+3. In Chrome on Android, tap ⋮ then **Add to Home screen** (or **Install app**). It then opens like a normal app.
+
+## Calendars
+
+Events you add in the hub are shared through Firebase and need nothing else.
+
+To also show **Google / iCloud / Outlook** calendars, add each one in ⚙️ → Calendars
+using its secret iCal address:
+- **Google**: Calendar settings, then the calendar, then *Integrate calendar*, then **Secret address in iCal format**
+- **iCloud**: Calendar app, then share the calendar, then **Public Calendar**, then copy the link
+- **Outlook**: Settings, then Calendar, then Shared calendars, then **Publish**, then the ICS link
+
+These providers don't let a web page read their feeds directly (the browser blocks it).
+The fix is a tiny free **Cloudflare Worker** that passes the feed through. It runs on
+Cloudflare, so there's still nothing to run at home:
+
+1. Sign up at <https://dash.cloudflare.com> (free), go to **Workers & Pages**, then **Create**, then **Create Worker**, then **Deploy**.
+2. Click **Edit code**, replace everything with [`cors-proxy.worker.js`](cors-proxy.worker.js), then **Deploy**.
+3. In House Hub, open ⚙️ and set the **CORS proxy** to `https://<your-worker>.<you>.workers.dev/?url=`.
+
+The worker only forwards Google, iCloud and Outlook calendar addresses, so nobody can
+use it as an open proxy. Calendar settings are shared, so you only set this up once.
+
+## Cameras (Ring doorbell + LSC garage camera)
+
+To be upfront: **live camera video needs something running at home.** Ring has no public
+stream, and the LSC camera streams on your local network, so no website can show them on
+its own.
+
+The usual tool is [go2rtc](https://github.com/AlexxIT/go2rtc). It's free and runs on a
+Raspberry Pi, a NAS or a PC, or as a Home Assistant add-on. There's a starter config in
+[`go2rtc.example.yaml`](go2rtc.example.yaml).
+- **Ring**: go2rtc has built-in Ring support. In the go2rtc web UI (`:1984`) click **Add**, then **Ring**, then log in.
+- **LSC Smart Connect (Action)**: many models offer RTSP/ONVIF (`rtsp://admin:PASSWORD@<ip>:554/stream1`). Cloud-only models need custom firmware (OpenIPC / thingino) or a Tuya integration in Home Assistant.
+
+Then add each camera in ⚙️ → Cameras:
+
+| Type | URL example |
+|---|---|
+| MJPEG (best for old iPads) | `http://192.168.1.10:1984/api/stream.mjpeg?src=garage` |
+| HLS | `http://192.168.1.10:1984/api/stream.m3u8?src=garage` |
+| Snapshot | `http://192.168.1.10:1984/api/frame.jpeg?src=ring_doorbell` |
+
+**The catch with `http://`:** the app is served over `https://`. Newer browsers
+(Chrome on Android, recent iOS) block `http://` camera addresses inside an `https://`
+page. Older iPads usually allow them. To get cameras working everywhere, serve go2rtc
+over HTTPS. go2rtc supports `tls_listen` with a certificate, and the Home Assistant
+add-on with Nabu Casa or a reverse proxy gives you HTTPS out of the box. On the phones,
+the Ring app is often simplest anyway.
+
+Streams only run while the Cameras screen is open, which saves Wi-Fi and the Ring battery.
+
+## Development
 
 ```bash
 cd house_hub
-cp config.example.json config.json   # then edit it
-npm start                            # or: node server.js
+npm start      # serves public/ on http://localhost:3000
+npm test       # calendar parser + proxy tests
 ```
 
-### On the iPad
-1. Open Safari and go to `http://<server-ip>:8080`.
-2. Tap Share, then **Add to Home Screen**. Open it from the new icon to get full screen without the Safari toolbars.
-3. Go to Settings, then Display & Brightness, then **Auto-Lock: Never**, and leave it plugged in.
-4. Optional: turn on **Guided Access** (Settings, then Accessibility) to lock the iPad to the hub.
-
-### Calendars
-In `config.json`, add each calendar's secret iCal address under `calendars`:
-- **Google**: Calendar settings, then *Integrate calendar*, then **Secret address in iCal format**
-- **iCloud**: Calendar app, then share the calendar, then **Public Calendar**, then copy the `webcal://` link
-- **Outlook**: Settings, then Calendar, then Shared calendars, then **Publish**, then the ICS link
-
-Feeds refresh every 10 minutes. The feeds are read-only, so events you add in the hub
-are stored in the hub.
-
-### Cameras (Ring doorbell + LSC garage camera)
-Neither camera gives you a stream a browser can play directly, so use
-[go2rtc](https://github.com/AlexxIT/go2rtc). It's a small free program that converts
-camera streams. Run it on the same machine as the hub. There is a starter config in
-`go2rtc.example.yaml`.
-
-- **Ring**: go2rtc has a built-in Ring source. In the go2rtc web UI (`:1984`), click **Add**, then **Ring**, then log in. Copy the generated `ring:` line into `go2rtc.yaml`. A battery doorbell drains faster while it streams, so the hub only streams while the Cameras screen is open.
-- **LSC Smart Connect (Action)**: many models can do RTSP/ONVIF (e.g. `rtsp://admin:PASSWORD@<ip>:554/stream1`). Some only stream through the Tuya cloud. Those need custom firmware (OpenIPC / thingino) or a Tuya integration in Home Assistant.
-
-Then set each camera in `config.json`:
-
-| `type` | Use for | Example `url` |
-|---|---|---|
-| `mjpeg` | **Best for old iPads**: live video in a plain image | `http://<server>:1984/api/stream.mjpeg?src=garage` |
-| `hls` | Native iOS video (lower bandwidth) | `http://<server>:1984/api/stream.m3u8?src=garage` |
-| `snapshot` | A still image refreshed every `refreshSeconds` (the server fetches it for you) | `http://<server>:1984/api/frame.jpeg?src=ring_doorbell` |
-| `iframe` | Embed any web page | anything |
-
-If you already use Home Assistant, you can use its camera proxy URLs instead.
-
-### Run it on boot (Raspberry Pi / Linux)
-```ini
-# /etc/systemd/system/house-hub.service
-[Unit]
-Description=House Hub
-After=network-online.target
-
-[Service]
-WorkingDirectory=/home/pi/house_hub
-ExecStart=/usr/bin/node server.js
-Restart=always
-User=pi
-
-[Install]
-WantedBy=multi-user.target
-```
-```bash
-sudo systemctl enable --now house-hub
-```
-
-## Data & API
-Everything is saved in `data/state.json` (back it up if you care about it). The API is
-small: `GET /api/state`, `PUT /api/state/{events|groceries|todos|checklists|notes}`,
-`GET /api/calendar`, `GET /api/config`. There is **no login**, so keep the server on your
-home network and don't port-forward it to the internet.
-
-## Tests
-```bash
-npm test        # calendar (.ics) parser tests
-```
+All the app code is in `public/`: `app.js` (the app), `ics.js` (the calendar feed
+parser), `app.css`, `sw.js` (offline support) and `manifest.webmanifest`
+(installable on Android).

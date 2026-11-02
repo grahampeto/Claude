@@ -1,0 +1,46 @@
+# Publishes house_hub/public to GitHub Pages.
+# One-time setup: repo Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# If a deploy is refused because of the branch, add it under
+# Settings → Environments → github-pages → Deployment branches.
+name: Deploy House Hub to GitHub Pages
+
+on:
+  push:
+    branches: [main, claude/nice-mayer-s8lx0u]
+    paths: ['house_hub/**', '.github/workflows/house-hub-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+        working-directory: house_hub
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: house_hub/public
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,7 +1,7 @@
 'use strict';
 var test = require('node:test');
 var assert = require('node:assert');
-var ics = require('../lib/ics');
+var ics = require('../public/ics');
 
 var SAMPLE = [
   'BEGIN:VCALENDAR',
