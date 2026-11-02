@@ -1,0 +1,12 @@
+{
+  "name": "house-hub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Home dashboard for a wall-mounted iPad: notifications, calendar, groceries, to-do, cameras and daily checklists.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=14" }
+}

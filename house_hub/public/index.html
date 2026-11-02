@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>House Hub</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="House Hub">
+<meta name="theme-color" content="#10141c">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="home" class="screen flex col">
+  <div class="home-top flex between">
+    <div>
+      <div class="clock" id="clock">--:--</div>
+      <div class="date" id="date"></div>
+    </div>
+    <div class="home-title">
+      <h1 id="title">Our Home</h1>
+      <div class="sync" id="sync"></div>
+    </div>
+  </div>
+
+  <div class="section-label">Today's checklists</div>
+  <div class="progress-row flex" id="progress"></div>
+
+  <div class="flex between center">
+    <div class="section-label">Notifications</div>
+    <button class="btn small" data-action="add-note">+ Leave a note</button>
+  </div>
+  <div class="notifications grow" id="notifications"></div>
+
+  <div class="dock flex">
+    <button class="app-btn" data-action="open" data-app="calendar"><div class="tile t-cal">📅<span class="badge hidden" id="badge-calendar"></span></div><div class="label">Calendar</div></button>
+    <button class="app-btn" data-action="open" data-app="groceries"><div class="tile t-groc">🛒<span class="badge hidden" id="badge-groceries"></span></div><div class="label">Groceries</div></button>
+    <button class="app-btn" data-action="open" data-app="todo"><div class="tile t-todo">✅<span class="badge hidden" id="badge-todo"></span></div><div class="label">To-Do</div></button>
+    <button class="app-btn" data-action="open" data-app="cameras"><div class="tile t-cam">📹</div><div class="label">Cameras</div></button>
+    <button class="app-btn" data-action="open" data-app="checklists"><div class="tile t-check">📋<span class="badge hidden" id="badge-checklists"></span></div><div class="label">Daily Checklist</div></button>
+  </div>
+</div>
+
+<div id="panel" class="screen flex col hidden">
+  <div class="panel-head flex center between">
+    <button class="back" data-action="home">‹ Home</button>
+    <h2 id="panel-title" class="grow"></h2>
+    <div class="head-right" id="panel-actions"></div>
+  </div>
+  <div class="panel-body grow" id="panel-body"></div>
+</div>
+
+<div id="modal-root"></div>
+<div id="dimmer" class="hidden"><div class="clock" id="dim-clock"></div></div>
+
+<script src="app.js"></script>
+</body>
+</html>

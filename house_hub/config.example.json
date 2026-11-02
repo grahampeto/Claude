@@ -1,0 +1,25 @@
+{
+  "title": "Our Home",
+  "port": 8080,
+  "people": ["Jess", "Graham"],
+
+  "calendarRefreshMinutes": 10,
+  "calendars": [
+    { "name": "Family", "color": "#4f8cff", "url": "" },
+    { "name": "Jess",   "color": "#e86fa8", "url": "" },
+    { "name": "Graham", "color": "#3fbf7f", "url": "" }
+  ],
+
+  "cameras": [
+    {
+      "name": "Front door (Ring)",
+      "type": "mjpeg",
+      "url": "http://192.168.1.10:1984/api/stream.mjpeg?src=ring_doorbell"
+    },
+    {
+      "name": "Garage (LSC)",
+      "type": "mjpeg",
+      "url": "http://192.168.1.10:1984/api/stream.mjpeg?src=garage"
+    }
+  ]
+}

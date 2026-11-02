@@ -34,3 +34,9 @@ pytest                                   # offline tests on synthetic prices
 ```
 
 Not investment advice. Yahoo fundamentals can be stale or missing for some tickers.
+
+---
+
+## Also in this repo
+
+- [`house_hub/`](house_hub/README.md) – home dashboard for a wall-mounted iPad (calendar, groceries, to-do, cameras, daily checklists).
