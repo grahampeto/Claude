@@ -85,6 +85,13 @@ dialog form { padding: 18px; }
 .err { color: var(--bad); font-size: .9rem; margin-top: 8px; }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; }
 #sync { font-size: .85rem; }
+.chip.paused { background: var(--line); color: var(--muted); }
+.med.paused .med-name { color: var(--muted); }
+.group-label { font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 16px 0 4px; }
+label.check { display: flex; align-items: center; gap: 10px; color: var(--ink); margin-top: 14px; }
+label.check input { width: 20px; height: 20px; }
+.seed { border-color: var(--accent); }
+.seed .tools { margin-top: 10px; }
 #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: .95rem; max-width: calc(100vw - 32px); }
 @media (max-width: 380px) { .actions, .row { grid-template-columns: 1fr; } }
@@ -99,6 +106,12 @@ dialog form { padding: 18px; }
   </div>
 
   <div id="banner"></div>
+
+  <section class="card seed" id="seedCard" hidden>
+    <h2>Your spreadsheet data is ready</h2>
+    <p class="muted" id="seedText">Load your medications, current counts and history from your spreadsheet. This replaces what's in the tracker now.</p>
+    <div class="tools"><button class="primary" id="btnSeed">Load my spreadsheet data</button><button id="btnSeedSkip">Not now</button></div>
+  </section>
 
   <div class="actions">
     <button class="primary big" id="btnPickup">Got pills from pharmacy</button>
@@ -143,13 +156,15 @@ dialog form { padding: 18px; }
     <label for="mName">Name and strength</label>
     <input id="mName" placeholder="e.g. Metformin 500 mg">
     <div class="row">
-      <div><label for="mPerDay">Pills per day</label><input id="mPerDay" type="number" min="0.25" step="0.25" inputmode="decimal"></div>
+      <div><label for="mPerWeek">Pills per week (e.g. 7 for one a day)</label><input id="mPerWeek" type="number" min="0.05" step="any" inputmode="decimal"></div>
       <div><label for="mPack">Pills per pharmacy pickup</label><input id="mPack" type="number" min="1" inputmode="numeric"></div>
     </div>
     <div class="row">
       <div><label for="mStock">Loose pills at home now (not in the dispenser)</label><input id="mStock" type="number" min="0" step="0.25" inputmode="decimal"></div>
       <div><label for="mDisp">Pills in the dispenser now</label><input id="mDisp" type="number" min="0" step="0.25" inputmode="decimal"></div>
     </div>
+    <label class="check" for="mActive"><input id="mActive" type="checkbox"> I'm taking this now</label>
+    <p class="muted" style="margin:4px 0 0">Untick to pause it, for example after a dose change. Its pills stay counted but it's left out of fills and order reminders.</p>
     <div class="err" id="medErr"></div>
     <div class="dialog-actions">
       <button type="button" class="link danger" id="btnDeleteMed" style="margin-right:auto">Delete</button>
@@ -181,7 +196,7 @@ dialog form { padding: 18px; }
       <div><label for="fDate">Date</label><input id="fDate" type="date"></div>
       <div><label for="fDays">Days filled</label><input id="fDays" type="number" min="1" inputmode="numeric"></div>
     </div>
-    <p class="muted">Pills moved from your loose stock into the dispenser:</p>
+    <p class="muted">Pills moved from your loose stock into the dispenser. Change any number that differs.</p>
     <div id="fillRows"></div>
     <div class="err" id="fillErr"></div>
     <div class="dialog-actions">
@@ -218,8 +233,14 @@ function diffDays(a, b) { return toDays(a) - toDays(b); }
 function fmt(s) { const [y, m, d] = s.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }); }
 function rel(n) { return n === 0 ? "today" : n === 1 ? "tomorrow" : n === -1 ? "yesterday" : n > 0 ? `in ${n} days` : `${-n} days ago`; }
-function num(n) { return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, ""); }
+function num(n) { n = Math.round(n * 100) / 100; return Number.isInteger(n) ? String(n) : String(n); }
+function pills(n) { return num(Math.ceil(n * 4 - 1e-6) / 4); }   // shown counts, rounded up to a quarter pill
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function dose(pw) {
+  if (pw >= 7 && Math.abs(pw / 7 - Math.round(pw / 7 * 4) / 4) < 1e-9) return `${num(pw / 7)} a day`;
+  if (pw < 1) return `1 every ${num(1 / pw)} weeks`;
+  return `${num(pw)} a week`;
+}
 
 // ---------- small UI helpers ----------
 let toastTimer;
@@ -228,8 +249,7 @@ function ask(text, okLabel = "Yes") {
   return new Promise(resolve => {
     $("confirmText").textContent = text; $("confirmOk").textContent = okLabel;
     const dlg = $("dlgConfirm");
-    const done = v => { dlg.removeEventListener("close", onClose); resolve(v); };
-    const onClose = () => done(dlg.returnValue === "ok");
+    const onClose = () => { dlg.removeEventListener("close", onClose); resolve(dlg.returnValue === "ok"); };
     dlg.returnValue = ""; dlg.addEventListener("close", onClose); dlg.showModal();
   });
 }
@@ -237,25 +257,34 @@ $("formConfirm").addEventListener("submit", e => { e.preventDefault(); $("dlgCon
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
 
 // ---------- state ----------
-// Each med: { id, name, perDay, pack, stock, disp, dispAsOf }
+// Each med: { id, name, perWeek, pack, stock, disp, dispAsOf, active }
 //   stock = loose pills at home (outside the dispenser)
-//   disp  = pills in the dispenser on dispAsOf; they are taken at perDay from that date on
+//   disp  = pills in the dispenser on dispAsOf; they are taken at perWeek/7 a day from then on
+//   active = false while paused (e.g. a strength not used at the current dose)
 function blank() { return { meds: [], history: [], settings: { leadDays: 7, cycleDays: 30, fillDays: 7 } }; }
-function normalize(s) { return { ...blank(), ...s, settings: { ...blank().settings, ...(s && s.settings) } }; }
+function normalize(s) {
+  const out = { ...blank(), ...s, settings: { ...blank().settings, ...(s && s.settings) } };
+  out.meds = (out.meds || []).map(m => ({ active: true, ...m, perWeek: m.perWeek != null ? m.perWeek : (m.perDay || 1) * 7 }));
+  out.meds.forEach(m => delete m.perDay);
+  return out;
+}
 function readLocal() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.meds)) return normalize(s); } catch (e) {} return null; }
 function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 let state = readLocal() || blank();
 function uid() { return Math.random().toString(36).slice(2, 10); }
+const rate = m => m.perWeek / 7;
+const active = () => state.meds.filter(m => m.active);
 
 // Storage: your private record in your Claude account when available, otherwise this browser only.
-let cloud = null;           // DocumentReference for data/users/<you>/tracker
+let db = null, cloud = null, seedRef = null, seed = null;
 let writing = Promise.resolve();
 let dirty = false;
 function setSync(text) { $("sync").textContent = text; }
 async function initCloud() {
   if (!window.claude || !window.claude.use) { setSync("Saved in this browser only."); return; }
   try {
-    const [db, user] = await Promise.all([claude.use("db"), claude.use("user")]);
+    const user = await claude.use("user");
+    db = await claude.use("db");
     const me = user && await user.id();
     if (!db || !me) { setSync("Saved in this browser only."); return; }
     cloud = db.doc(`data/users/${me}/tracker`);
@@ -265,6 +294,7 @@ async function initCloud() {
       else push();
     } else if (state.meds.length) push();
     setSync("Saved privately to your Claude account. Only you can see it.");
+    checkSeed();
   } catch (e) {
     cloud = null; setSync("Couldn't reach your Claude account. Saved in this browser only.");
   }
@@ -273,34 +303,55 @@ function push() {
   if (!cloud) return;
   const snapshot = JSON.parse(JSON.stringify(state));
   writing = writing.then(() => cloud.set(snapshot)).catch(e => {
-    setSync(e && e.code === "quota_exceeded" ? "Your history is too large to save. Undo less often or import a smaller backup." : "Last change wasn't saved to your account. It is kept in this browser.");
+    setSync(e && e.code === "quota_exceeded" ? "Your history is too large to save. Export a backup and import a shorter one." : "Last change wasn't saved to your account. It is kept in this browser.");
   });
 }
 function save() { dirty = true; writeLocal(); push(); render(); }
 
+// Data prepared from your spreadsheet waits in an owner-only spot until you load it.
+async function checkSeed() {
+  try {
+    seedRef = db.doc("import/seed");
+    const s = await seedRef.get();
+    if (!s.exists) return;
+    seed = s.data();
+    if (!seed || !seed.state || seed.id === state.seedApplied) return;
+    if (seed.note) $("seedText").textContent = seed.note;
+    $("seedCard").hidden = false;
+  } catch (e) {}
+}
+$("btnSeed").onclick = async () => {
+  if (state.meds.length && !await ask("Replace the medications and history in the tracker now with your spreadsheet data?", "Replace")) return;
+  state = normalize(seed.state); state.seedApplied = seed.id;
+  $("seedCard").hidden = true; save(); toast("Spreadsheet data loaded");
+  try { await writing; await seedRef.delete(); } catch (e) {}
+};
+$("btnSeedSkip").onclick = () => { $("seedCard").hidden = true; };
+
 // Record an action with a snapshot of the medications beforehand so it can be undone.
 function record(text, extra = {}) {
   state.history.unshift({ id: uid(), date: todayISO(), text, before: JSON.stringify(state.meds), ...extra });
-  state.history = state.history.slice(0, 120);
+  state.history = state.history.slice(0, 150);
 }
 
 // ---------- calculations ----------
 function dispLeft(m, today) {
-  const taken = Math.max(0, diffDays(today, m.dispAsOf || today)) * m.perDay;
+  const taken = Math.max(0, diffDays(today, m.dispAsOf || today)) * rate(m);
   return Math.max(0, (m.disp || 0) - taken);
 }
 function project(m, today) {
   const { leadDays, cycleDays, fillDays } = state.settings;
   const inDisp = dispLeft(m, today);
-  const daysLeft = Math.floor((m.stock + inDisp) / m.perDay);
+  const daysLeft = Math.floor((m.stock + inDisp) / rate(m) + 1e-9);
   const runOut = addDays(today, daysLeft);
   const orderBy = addDays(runOut, -leadDays);
   const orderIn = diffDays(orderBy, today);
   const level = orderIn <= 0 ? "bad" : orderIn <= cycleDays ? "warn" : "ok";
-  return { inDisp, daysLeft, runOut, orderBy, orderIn, level, short: m.stock < m.perDay * fillDays };
+  const need = Math.round(rate(m) * fillDays);
+  return { inDisp, daysLeft, runOut, orderBy, orderIn, level, need, short: m.stock < need };
 }
 function nextFillDate() {
-  const f = state.history.find(h => h.kind === "fill");
+  const f = state.history.find(h => h.kind === "fill" && h.days);
   return f ? addDays(f.date, f.days) : null;
 }
 
@@ -308,11 +359,14 @@ function nextFillDate() {
 const LABEL = { bad: "Order now", warn: "Order this month", ok: "Stocked" };
 function render() {
   const today = todayISO();
-  const projs = state.meds.map(m => ({ m, p: project(m, today) })).sort((a, b) => a.p.orderIn - b.p.orderIn);
+  const projs = active().map(m => ({ m, p: project(m, today) })).sort((a, b) => a.p.orderIn - b.p.orderIn);
+  const paused = state.meds.filter(m => !m.active);
 
   let html;
   if (!state.meds.length) {
     html = `<div class="banner warn"><strong>Add your medications to start</strong>Tap “+ Add medication” and enter how many pills you have right now. The tracker then works out when to order.</div>`;
+  } else if (!projs.length) {
+    html = `<div class="banner warn"><strong>All medications are paused</strong>Edit a medication and tick “I'm taking this now” to track it again.</div>`;
   } else {
     const due = projs.filter(x => x.p.level !== "ok");
     const first = projs[0];
@@ -328,28 +382,40 @@ function render() {
   }
   $("banner").innerHTML = html;
 
-  $("meds").innerHTML = projs.length ? projs.map(({ m, p }) => `
+  const activeHtml = projs.map(({ m, p }) => `
     <div class="med">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
         <span><span class="chip ${p.level}">${LABEL[p.level]}</span> <button class="link" data-edit="${m.id}">Edit</button></span>
       </div>
-      <div class="muted">${num(m.perDay)} a day · ${num(m.pack)} per pickup</div>
+      <div class="muted">${dose(m.perWeek)} · ${num(m.pack)} per pickup</div>
       <div class="stats">
-        <div class="stat"><b>${num(m.stock)}</b><span>loose at home</span></div>
-        <div class="stat"><b>${num(p.inDisp)}</b><span>in dispenser</span></div>
+        <div class="stat"><b>${pills(m.stock)}</b><span>loose at home</span></div>
+        <div class="stat"><b>${pills(p.inDisp)}</b><span>in dispenser</span></div>
         <div class="stat"><b>${p.daysLeft} days</b><span>until ${fmt(p.runOut)}</span></div>
       </div>
-      ${p.short ? `<div class="short">Not enough loose pills for a full ${state.settings.fillDays}-day fill (needs ${num(m.perDay * state.settings.fillDays)}).</div>` : ""}
-    </div>`).join("") : `<p class="muted">No medications yet.</p>`;
+      ${p.short ? `<div class="short">Not enough loose pills for a full ${state.settings.fillDays}-day fill (needs ${p.need}).</div>` : ""}
+    </div>`).join("");
+  const pausedHtml = paused.map(m => `
+    <div class="med paused">
+      <div class="med-head">
+        <span class="med-name">${esc(m.name)}</span>
+        <span><span class="chip paused">Paused</span> <button class="link" data-edit="${m.id}">Edit</button></span>
+      </div>
+      <div class="muted">${pills(m.stock)} loose at home · last dose ${dose(m.perWeek)}</div>
+    </div>`).join("");
+  $("meds").innerHTML = state.meds.length
+    ? activeHtml + (paused.length ? `<div class="group-label">Paused</div>` + pausedHtml : "")
+    : `<p class="muted">No medications yet.</p>`;
 
-  $("history").innerHTML = state.history.length ? state.history.slice(0, 30).map((h, i) => `
+  $("history").innerHTML = state.history.length ? state.history.slice(0, 40).map((h, i) => `
     <div class="history-item"><span><span class="muted">${fmt(h.date)}</span> · ${esc(h.text)}</span>
-    ${i === 0 ? `<button class="link" id="btnUndo">Undo</button>` : ""}</div>`).join("") : `<p class="muted">Pickups and dispenser fills you log appear here.</p>`;
+    ${i === 0 && h.before ? `<button class="link" id="btnUndo">Undo</button>` : ""}</div>`).join("") : `<p class="muted">Pickups and dispenser fills you log appear here.</p>`;
   if ($("btnUndo")) $("btnUndo").onclick = undo;
 
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openMed(b.dataset.edit));
-  $("btnPickup").disabled = $("btnFill").disabled = !state.meds.length;
+  $("btnPickup").disabled = !state.meds.length;
+  $("btnFill").disabled = !projs.length;
   $("setLead").value = state.settings.leadDays;
   $("setCycle").value = state.settings.cycleDays;
   $("setFill").value = state.settings.fillDays;
@@ -357,7 +423,7 @@ function render() {
 
 async function undo() {
   const h = state.history[0];
-  if (!h || !await ask(`Undo “${h.text}”?`, "Undo")) return;
+  if (!h || !h.before || !await ask(`Undo “${h.text}”?`, "Undo")) return;
   state.meds = JSON.parse(h.before);
   state.history.shift();
   save(); toast("Undone");
@@ -369,10 +435,11 @@ function openMed(id) {
   editing = id ? state.meds.find(m => m.id === id) : null;
   $("medTitle").textContent = editing ? "Edit medication" : "Add medication";
   $("mName").value = editing ? editing.name : "";
-  $("mPerDay").value = editing ? editing.perDay : 1;
+  $("mPerWeek").value = editing ? num(editing.perWeek) : 7;
   $("mPack").value = editing ? editing.pack : 30;
-  $("mStock").value = editing ? editing.stock : "";
-  $("mDisp").value = editing ? num(dispLeft(editing, todayISO())) : 0;
+  $("mStock").value = editing ? num(editing.stock) : "";
+  $("mDisp").value = editing ? (editing.active ? pills(dispLeft(editing, todayISO())) : 0) : 0;
+  $("mActive").checked = editing ? editing.active : true;
   $("btnDeleteMed").hidden = !editing;
   $("medErr").textContent = "";
   $("dlgMed").showModal();
@@ -381,21 +448,29 @@ $("btnAddMed").onclick = () => openMed(null);
 $("btnDeleteMed").onclick = async () => {
   const m = editing; if (!m) return;
   $("dlgMed").close();
-  if (!await ask(`Delete ${m.name}? You can undo this from History.`, "Delete")) return;
+  if (!await ask(`Delete ${m.name}? If it might come back after a checkup, pause it instead. You can undo this from History.`, "Delete")) return;
   record(`Deleted ${m.name}`);
   state.meds = state.meds.filter(x => x.id !== m.id);
   save(); toast(`Deleted ${m.name}`);
 };
 $("formMed").addEventListener("submit", e => {
   e.preventDefault();
-  const name = $("mName").value.trim(), perDay = +$("mPerDay").value, pack = +$("mPack").value,
-        stock = $("mStock").value === "" ? NaN : +$("mStock").value, disp = +$("mDisp").value || 0;
+  const name = $("mName").value.trim(), perWeek = +$("mPerWeek").value, pack = +$("mPack").value,
+        stock = $("mStock").value === "" ? NaN : +$("mStock").value, disp = +$("mDisp").value || 0, isActive = $("mActive").checked;
   if (!name) { $("medErr").textContent = "Enter the medication's name."; return; }
-  if (!(perDay > 0)) { $("medErr").textContent = "Pills per day must be more than 0."; return; }
+  if (!(perWeek > 0)) { $("medErr").textContent = "Pills per week must be more than 0. To stop a medication for now, untick “I'm taking this now”."; return; }
   if (!(pack > 0)) { $("medErr").textContent = "Pills per pickup must be more than 0."; return; }
   if (!(stock >= 0) || !(disp >= 0)) { $("medErr").textContent = "Enter how many pills you have now. Use 0 if none."; return; }
-  record(editing ? `Edited ${name}` : `Added ${name} (${num(stock)} loose, ${num(disp)} in dispenser)`);
-  const data = { name, perDay, pack, stock, disp, dispAsOf: todayISO() };
+  let text;
+  if (!editing) text = `Added ${name} (${num(stock)} loose, ${num(disp)} in dispenser)`;
+  else if (editing.active && !isActive) text = `Paused ${name}`;
+  else if (!editing.active && isActive) text = `Resumed ${name} at ${dose(perWeek)}`;
+  else if (editing.perWeek !== perWeek) text = `Changed ${name} dose to ${dose(perWeek)}`;
+  else text = `Edited ${name}`;
+  record(text);
+  // Pausing moves anything left in the dispenser back into the loose count.
+  const data = isActive ? { name, perWeek, pack, stock, disp, dispAsOf: todayISO(), active: true }
+                        : { name, perWeek, pack, stock: stock + disp, disp: 0, dispAsOf: todayISO(), active: false };
   if (editing) Object.assign(state.meds.find(m => m.id === editing.id), data);
   else state.meds.push({ id: uid(), ...data });
   $("dlgMed").close(); save(); toast(`Saved ${name}`);
@@ -404,9 +479,10 @@ $("formMed").addEventListener("submit", e => {
 // ---------- pharmacy pickup ----------
 $("btnPickup").onclick = () => {
   $("pDate").value = todayISO();
-  $("pickupRows").innerHTML = state.meds.map(m => `
-    <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}</label>
-    <input id="pk_${m.id}" type="number" min="0" step="0.25" inputmode="decimal" value="${m.pack}"></div>`).join("");
+  const list = [...active(), ...state.meds.filter(m => !m.active)];
+  $("pickupRows").innerHTML = list.map(m => `
+    <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}${m.active ? "" : ` <span class="muted">(paused)</span>`}</label>
+    <input id="pk_${m.id}" type="number" min="0" step="any" inputmode="decimal" value="${m.active ? m.pack : 0}"></div>`).join("");
   $("dlgPickup").showModal();
 };
 $("formPickup").addEventListener("submit", e => {
@@ -422,12 +498,13 @@ $("formPickup").addEventListener("submit", e => {
 // ---------- dispenser fill ----------
 function fillRows() {
   const days = Math.max(1, +$("fDays").value || 1);
-  const short = [];
-  $("fillRows").innerHTML = state.meds.map(m => {
-    const need = m.perDay * days;
-    if (need > m.stock) short.push(m.name);
-    return `<div class="qty-row"><span>${esc(m.name)}</span><span style="text-align:right"><b>${num(Math.min(need, m.stock))}</b> <span class="muted">of ${num(m.stock)}</span></span></div>`;
-  }).join("");
+  $("fillRows").innerHTML = active().map(m => `
+    <div class="qty-row"><label for="fq_${m.id}">${esc(m.name)} <span class="muted">· ${num(m.stock)} loose</span></label>
+    <input id="fq_${m.id}" type="number" min="0" step="any" inputmode="decimal" value="${Math.round(rate(m) * days)}"></div>`).join("");
+  checkFill();
+}
+function checkFill() {
+  const short = active().filter(m => (+$("fq_" + m.id).value || 0) > m.stock).map(m => m.name);
   $("fillErr").textContent = short.length ? `Not enough loose pills for: ${short.join(", ")}. If you have more at home, log the pickup first.` : "";
 }
 $("btnFill").onclick = () => {
@@ -437,16 +514,17 @@ $("btnFill").onclick = () => {
   $("dlgFill").showModal();
 };
 $("fDays").oninput = fillRows;
+$("fillRows").addEventListener("input", checkFill);
 $("formFill").addEventListener("submit", e => {
   e.preventDefault();
   const date = $("fDate").value || todayISO();
   const days = Math.max(1, Math.round(+$("fDays").value) || state.settings.fillDays);
-  record(`Filled dispenser for ${days} days`, { date, kind: "fill", days });
-  state.meds.forEach(m => {
-    const moved = Math.min(m.stock, m.perDay * days);
-    m.disp = moved + dispLeft(m, date);   // pills still in the dispenser stay there
+  const moves = active().map(m => [m, Math.min(m.stock, Math.max(0, +$("fq_" + m.id).value || 0))]);
+  record(`Filled dispenser for ${days} days: ${moves.filter(([, q]) => q > 0).map(([m, q]) => `${num(q)} × ${m.name}`).join(", ")}`, { date, kind: "fill", days });
+  moves.forEach(([m, q]) => {
+    m.disp = q + dispLeft(m, date);   // pills still in the dispenser stay there
     m.dispAsOf = date;
-    m.stock -= moved;
+    m.stock -= q;
   });
   $("dlgFill").close(); save(); toast("Dispenser fill saved");
 });
