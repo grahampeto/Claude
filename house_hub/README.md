@@ -41,7 +41,7 @@ GitHub Pages (the app: HTML/JS/CSS)
 
 ### 1. Publish the app (GitHub Pages)
 1. On GitHub, open the repo, then **Settings → Pages**. Under *Build and deployment*, set **Source: GitHub Actions**.
-2. Go to **Actions**, open **Deploy House Hub to GitHub Pages**, then click **Run workflow** (it also runs on every push to this branch or `main`).
+2. The deploy runs automatically on every push to this branch or `main`. To run it by hand, open the latest **Deploy House Hub to GitHub Pages** run under **Actions** and click **Re-run all jobs**. (GitHub only shows a *Run workflow* button once the workflow file is on the repo's default branch.)
 3. Your app will be at **`https://grahampeto.github.io/Claude/`**.
 
 If the run says the branch isn't allowed to deploy, go to **Settings → Environments →
