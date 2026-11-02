@@ -12,7 +12,7 @@ and big buttons along the bottom for the sub-apps:
 | 📅 **Calendar** | Month view plus a day list. **Two-way Google Calendar sync**: Google events show here, and events added here go into Google. Events are tagged Jess / Graham / Both. |
 | 🛒 **Groceries** | Shared shopping list. Adding something that's already there bumps it to ×2, ×3… (or use − / +). Tick an item and it's removed (with Undo). Items you buy often appear under *Buy again*. **Meals**: save a meal with its ingredients, then tap **+ Add to list** to put them all on the list. |
 | ✅ **To-Do** | Tasks with an owner (Jess / Graham / Together) and an optional due date. |
-| 📹 **Cameras** | Ring doorbell and LSC garage camera (see the camera section below). |
+| 📹 **Cameras** | Live LSC garage camera and Ring doorbell snapshots, both through the cloud, so nothing extra runs at home. Doorbell presses show on the home screen. |
 | 📋 **Daily Checklist** | Separate lists for Jess, Graham and Together. They reset every day and show the last 7 days. Tap **Edit list** to change the items. |
 
 **Notifications** come from:
@@ -87,6 +87,21 @@ and chores. Don't store anything sensitive.
 2. Open the link on the phone and tap **OK** to connect.
 3. In Chrome on Android, tap ⋮ then **Add to Home screen** (or **Install app**). It then opens like a normal app.
 
+## The House Hub worker (set up once, about 5 minutes)
+
+Some features need a little bit of "server": Google Calendar sync and the cameras. Instead
+of a box at home, they run in a free **Cloudflare Worker**
+([`house-hub.worker.js`](house-hub.worker.js)), which is a small piece of code Cloudflare
+runs for you in the cloud. Each feature is optional, so set up only the ones you want.
+
+1. Sign up at <https://dash.cloudflare.com> (free). Go to **Workers & Pages → Create → Create Worker**, name it `house-hub`, and click **Deploy**.
+2. Click **Edit code**, replace everything with the contents of [`house-hub.worker.js`](house-hub.worker.js), and click **Deploy**. Do this again whenever the file changes.
+3. Go to **Settings → Variables and Secrets** and add `HUB_TOKEN` as a **Secret**: any long random password you make up.
+4. In House Hub, open ⚙️ **Settings → House Hub worker**, paste the worker's address (e.g. `https://house-hub.yourname.workers.dev`) and the `HUB_TOKEN`, and tap **Save & test**. This setting is shared, so every device picks it up.
+
+The worker also lets the hub read **iCloud / Outlook** calendar feeds. Add them under
+*Other calendars (.ics feeds)*.
+
 ## Google Calendar sync (two-way)
 
 What you get:
@@ -94,10 +109,8 @@ What you get:
 - Events you add in the hub are created in Google, coloured by who they're for: Jess = pink, Graham = green, Both = blue.
 - Tapping ✕ on a Google event in the hub deletes it from Google.
 
-How it works: a small free **Cloudflare Worker** ([`house-hub.worker.js`](house-hub.worker.js))
-talks to Google using a Google **service account**, which is a robot Google account you
-share your calendars with. Nobody has to sign in on the iPad, and nothing expires.
-Setup takes about 15 minutes, once.
+The worker talks to Google through a **service account**, which is a robot Google account
+you share your calendars with. Nobody signs in on the iPad, and nothing expires.
 
 ### A. Create the Google service account
 1. Go to <https://console.cloud.google.com>, then **Select a project → New project**. Name it `House Hub` and click **Create**.
@@ -112,107 +125,64 @@ Setup takes about 15 minutes, once.
 3. Scroll down to **Integrate calendar** and copy the **Calendar ID**. For your main calendar this is your Gmail address.
 4. Repeat for each calendar you want, e.g. Jess's calendar from Jess's account.
 
-### C. Create the Cloudflare Worker
-1. Sign up at <https://dash.cloudflare.com> (free). Go to **Workers & Pages → Create → Create Worker**, name it `house-hub`, and click **Deploy**.
-2. Click **Edit code**, replace everything with the contents of [`house-hub.worker.js`](house-hub.worker.js), and click **Deploy**.
-3. Go to the worker's **Settings → Variables and Secrets** and add:
+### C. Give the worker the details
+In the worker's **Settings → Variables and Secrets**, add:
+
+| Name | Type | Value |
+|---|---|---|
+| `GOOGLE_SERVICE_ACCOUNT` | Secret | the **entire contents** of the downloaded `.json` file |
+| `GOOGLE_CALENDAR_IDS` | Text | calendar IDs separated by commas, e.g. `you@gmail.com,jess@gmail.com`. New events go to the first one unless you pick another. |
+
+Then open ⚙️ Settings in the hub and tap **Save & test**. It should list your calendars.
+
+## Cameras, with no box at home
+
+| Camera | What you get in the hub | How |
+|---|---|---|
+| **LSC Outdoor Dual Band** (garage) | **Live video**, at home and away | The worker asks Tuya's official cloud API for a short-lived live stream. LSC cameras are Tuya devices. |
+| **Ring doorbell** | The **latest snapshot** (refreshed every 30s), a **"Someone rang the doorbell"** notification on the home screen, a low-battery warning, and a **Live view** button that opens the Ring app | Ring has no official API. The worker uses the same unofficial one Home Assistant uses. |
+
+Streams only run while the Cameras screen is open.
+
+### LSC garage camera (Tuya), about 20 minutes
+1. **Move the camera to the Smart Life app.** Tuya's developer platform links to *Smart Life* or *Tuya Smart* accounts, not to the LSC app.
+   - In **LSC Smart Connect**, remove the camera.
+   - Install **Smart Life** (by Tuya) and create an account.
+   - Reset the camera (hold its reset button until it beeps) and add it in Smart Life. Check the live view works there.
+2. **Create a Tuya cloud project.** Sign up at <https://platform.tuya.com>, then go to **Cloud → Development → Create Cloud Project**:
+   - **Development Method:** Smart Home
+   - **Data Center:** **Central Europe** (this must match your Smart Life account's region; for the Netherlands it's Central Europe)
+   - On the API services screen, make sure **IoT Video Live Stream** is included, as well as the defaults (IoT Core, Authorization). The video one is what gives live streams.
+3. **Link your Smart Life account.** In the project, open **Devices → Link Tuya App Account → Add App Account**. Scan the QR code with Smart Life (**Me** tab → scan icon, top right). Your camera appears in the list: copy its **Device ID**.
+4. **Give the worker the keys.** On the project's **Overview** tab, copy the **Access ID** and **Access Secret**, then add them to the worker:
 
    | Name | Type | Value |
    |---|---|---|
-   | `HUB_TOKEN` | Secret | any long random password you make up |
-   | `GOOGLE_SERVICE_ACCOUNT` | Secret | the **entire contents** of the downloaded `.json` file |
-   | `GOOGLE_CALENDAR_IDS` | Text | calendar IDs separated by commas, e.g. `you@gmail.com,jess@gmail.com`. New events go to the first one unless you pick another. |
+   | `TUYA_CLIENT_ID` | Text | Access ID |
+   | `TUYA_CLIENT_SECRET` | Secret | Access Secret |
+   | `TUYA_ENDPOINT` | Text | only if your data center isn't Central Europe, e.g. Western Europe = `https://openapi-weaz.tuyaeu.com` |
 
-4. Copy the worker's address, e.g. `https://house-hub.yourname.workers.dev`.
+5. **Add it in the hub.** Go to ⚙️ **Settings → Cameras**, choose **LSC / Tuya camera**, enter a name and the Device ID, and tap **Add camera**.
 
-### D. Connect House Hub
-Open ⚙️ **Settings → Google Calendar sync**, paste the worker URL and the `HUB_TOKEN`,
-and tap **Save & test**. It should say *Connected: …* and list your calendars. This
-setting is shared, so you only do it once and every device picks it up.
+Notes:
+- Tuya's free developer plan has to be **renewed every few months** from the Tuya console. If the stream stops with a Tuya error, check that first.
+- If the camera records in H.265, some older iPads can't play it, and the tile will say so.
 
-The same worker also lets the hub read **iCloud / Outlook** calendar feeds. Add them
-under *Other calendars (.ics feeds)* using the calendar's public/secret iCal link.
+### Ring doorbell, about 5 minutes
+1. **Give the worker somewhere to keep the Ring login:**
+   - In Cloudflare, go to **Storage & Databases → KV → Create** and name it `house-hub`.
+   - Open the worker's **Settings → Bindings → Add → KV namespace**, set the variable name to `HUB_KV`, choose `house-hub`, and click **Deploy**.
+2. **Log in from the hub.** Go to ⚙️ **Settings → Cameras**, choose **Ring doorbell**, and enter your Ring email and password. Then enter the code Ring texts or emails you, and tap **Add** next to your doorbell. Your password only goes to your own worker. The worker stores just the login token, and refreshes it automatically.
+3. **In the Ring app,** turn on **Snapshot Capture** for the doorbell (Device → Settings). Otherwise battery doorbells only take a new picture when there's motion.
 
-## Cameras (Ring doorbell + LSC garage camera)
+Notes:
+- **"Live view"** opens the Ring app. On Android it opens straight away. On the iPad and iPhones it goes via the App Store page, where you tap **Open**. That only works if the Ring app supports your iOS version.
+- Doorbell notifications can show **up to 2 minutes late**, because the hub checks Ring every 2 minutes.
+- Ring lists the hub as **House Hub** under *Control Center → Authorized Client Devices*. You can remove it there at any time.
+- Because this uses Ring's unofficial API, Ring could change or block it without warning. If it stops working, log in again from Settings.
 
-**Why you need a small box at home:** Ring has no public video stream, and the LSC camera
-only streams on your home network. Something at home has to collect the video and hand
-it to the app. That's [go2rtc](https://github.com/AlexxIT/go2rtc): free, small, and it
-runs on a Raspberry Pi, a NAS, an always-on PC/Mac, or as a Home Assistant add-on.
-
-### Step 1: Install go2rtc on an always-on device
-It can't run on the wall iPad: iOS doesn't let apps run background servers. Pick one of these:
-- **Raspberry Pi / NAS / Linux with Docker:**
-  ```bash
-  mkdir -p ~/go2rtc && docker run -d --name go2rtc --network host --restart unless-stopped -v ~/go2rtc:/config alexxit/go2rtc
-  ```
-- **Home Assistant:** go to Settings → Add-ons → Add-on store → ⋮ → Repositories, add
-  `https://github.com/AlexxIT/hassio-addons`, then install **go2rtc** and start it.
-- **An old Android phone, left plugged in:** install **Termux** from F-Droid, download the
-  `go2rtc_linux_arm64` build from the releases page into Termux, make it executable
-  (`chmod +x`) and run it. Turn on Termux's wake lock and switch off battery optimisation for Termux so
-  Android doesn't stop it.
-- **Windows / Mac:** download go2rtc for your system from
-  <https://github.com/AlexxIT/go2rtc/releases> and run it. It creates `go2rtc.yaml` next to itself.
-
-Give the device a **fixed IP address** in your router (e.g. `192.168.1.10`), then open
-`http://192.168.1.10:1984` in a browser. You should see the go2rtc page.
-
-### Step 2: Add the Ring doorbell
-1. In the go2rtc page, click **Add**, then open the **Ring** section.
-2. Log in with your Ring email and password, and enter the 2-factor code Ring sends you.
-3. go2rtc shows a line starting `ring:?device_id=…&refresh_token=…`. Copy it.
-4. Click **Config** and add it under `streams:`, naming it `ring_doorbell` (see [`go2rtc.example.yaml`](go2rtc.example.yaml)). Save, then restart go2rtc.
-5. Back on the main page, click **stream** next to `ring_doorbell` to check you get video.
-
-Ring only streams while someone's watching. Battery doorbells drain faster while live,
-so the hub only streams while the Cameras screen is open, and the wall iPad goes back to
-the home screen after 3 idle minutes.
-
-### Step 3: Add the LSC garage camera
-LSC Smart Connect cameras (sold at Action) are Tuya-based, and it varies by model:
-1. Find the camera's IP address in your router's device list and give it a fixed IP.
-2. In go2rtc, click **Add** and look at the **ONVIF** section. If the camera is listed, click it and enter the camera password. go2rtc shows its `rtsp://…` address.
-3. If it isn't listed, check the camera's settings in the LSC Smart Connect app for an **ONVIF / RTSP / NVR** option. Turn it on, set a password, and try step 2 again. Then try `rtsp://admin:PASSWORD@<camera-ip>:554/` in go2rtc.
-4. Add it under `streams:` as `garage`, then save and restart.
-
-If your model has no ONVIF/RTSP at all, it only streams through Tuya's cloud. You have two options:
-- Use Home Assistant's **Tuya** integration. It shows the camera, and go2rtc can pull from Home Assistant.
-- Flash open firmware such as [thingino](https://thingino.com) or [OpenIPC](https://openipc.org). This only works on supported chips and is a bit techy.
-
-### Step 4: Add the cameras to House Hub
-In ⚙️ **Settings → Cameras**, choose **go2rtc camera** and enter:
-- **go2rtc address:** `http://192.168.1.10:1984`
-- **Stream name:** `ring_doorbell` (then add another one for `garage`)
-
-The app picks the best player for each device: go2rtc's own low-latency player on phones
-and newer iPads, and plain HLS video on old iPads.
-
-### Step 5: Open House Hub from the go2rtc box at home
-The GitHub Pages copy is `https://`, and browsers block `http://` camera streams inside
-an `https://` page. Old iPads are sometimes lenient, but phones aren't. The fix is to let
-go2rtc serve House Hub over `http://` on your home network. It's the same app with the
-same synced data.
-
-1. Put the app files on the go2rtc box (in the Docker example, inside `~/go2rtc`):
-   ```bash
-   cd ~/go2rtc && git clone -b claude/nice-mayer-s8lx0u https://github.com/grahampeto/Claude.git house-hub
-   ```
-2. Add this to `go2rtc.yaml` and restart go2rtc:
-   ```yaml
-   api:
-     listen: ":1984"
-     static_dir: "/config/house-hub/house_hub/public"   # Docker path; elsewhere use the real folder path
-   ```
-   Do Step 2 (the Ring login) first: once `static_dir` is set, the address shows House
-   Hub instead of go2rtc's own pages. Remove the line temporarily if you need those pages again.
-3. On the wall iPad, open `http://192.168.1.10:1984/`, add it to the Home Screen, and use that icon.
-4. In ⚙️ Settings, use **Got a setup link? Paste it here** with the link from another device. That connects it to your shared lists.
-5. To update it later, run `cd ~/go2rtc/house-hub && git pull`.
-
-Phones can use the same address while on your home Wi-Fi. Away from home, live cameras
-need more setup (go2rtc over HTTPS through Tailscale or Home Assistant Cloud), so the
-Ring app is usually simplest there.
+### Alternative: go2rtc on a box at home
+If you'd rather have live Ring video too, and don't mind a device at home that's always on (Raspberry Pi, NAS, PC or Home Assistant), see [`go2rtc.example.yaml`](go2rtc.example.yaml) and the camera type **go2rtc camera** in Settings. iPads can't run go2rtc themselves.
 
 ## Development
 

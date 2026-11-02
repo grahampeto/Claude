@@ -144,6 +144,7 @@
     listeners: [],
     calendar: { events: [], errors: [] },
     google: { calendars: [], events: [], errors: [], status: 'off' },
+    ring: { devices: [], error: '' },
 
     init: function () {
       var cached = lsGet('househub.state', null) || {};
@@ -163,6 +164,8 @@
       this.pullCalendar();
       setInterval(function () { self.pullCalendar(); }, 10 * 60000);
       setInterval(function () { self.pullGoogle(); }, 5 * 60000);
+      this.pullRing();
+      setInterval(function () { self.pullRing(); }, 2 * 60000);
     },
     onChange: function (fn) { this.listeners.push(fn); },
     emit: function () { for (var i = 0; i < this.listeners.length; i++) this.listeners[i](); },
@@ -235,7 +238,7 @@
       }
       this.cache();
       if (first) this.flush();
-      if (touched.indexOf('settings') >= 0) { this.pullCalendar(); this.pullGoogle(); }
+      if (touched.indexOf('settings') >= 0) { this.pullCalendar(); this.pullGoogle(); this.pullRing(); }
       this.emit();
     },
 
@@ -245,7 +248,7 @@
       this.cache();
       this.emit();
       this.flush();
-      if (key === 'settings') { this.pullCalendar(); this.pullGoogle(); }
+      if (key === 'settings') { this.pullCalendar(); this.pullGoogle(); this.pullRing(); }
     },
     flush: function () {
       var self = this, base = this.baseUrl();
@@ -304,7 +307,18 @@
     },
 
     // Two-way Google Calendar sync through the House Hub Cloudflare Worker.
-    googleOn: function () { var g = this.data.settings.google; return !!(g.url && g.token); },
+    workerOn: function () { var g = this.data.settings.google; return !!(g.url && g.token); },
+    googleOn: function () { return this.workerOn() && this.google.status !== 'unavailable'; },
+    // Ring: doorbell presses / motion and battery, for home-screen notifications.
+    pullRing: function () {
+      var self = this;
+      var hasRing = this.data.settings.cameras.some(function (c) { return c.type === 'ring'; });
+      if (!this.workerOn() || !hasRing) { this.ring = { devices: [], error: '' }; return; }
+      this.googleCall('GET', '/ring/devices', null, function (err, res) {
+        self.ring = err ? { devices: self.ring.devices, error: err.message } : { devices: res.devices || [], error: '' };
+        self.emit();
+      });
+    },
     googleCall: function (method, path, body, cb) {
       var g = this.data.settings.google;
       var x = new XMLHttpRequest();
@@ -323,12 +337,13 @@
     },
     pullGoogle: function () {
       var self = this;
-      if (!this.googleOn()) { this.google = { calendars: [], events: [], errors: [], status: 'off' }; return; }
+      if (!this.workerOn()) { this.google = { calendars: [], events: [], errors: [], status: 'off' }; return; }
       var now = new Date();
       var from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       var to = new Date(now.getFullYear(), now.getMonth() + 6, 1);
       this.googleCall('GET', '/google/events?from=' + encodeURIComponent(from.toISOString()) + '&to=' + encodeURIComponent(to.toISOString()), null, function (err, res) {
-        if (err) { self.google.status = 'error'; self.google.errors = [err.message]; }
+        if (err && /not set up/.test(err.message)) { self.google = { calendars: [], events: [], errors: [], status: 'unavailable' }; }
+        else if (err) { self.google.status = 'error'; self.google.errors = [err.message]; }
         else {
           self.google = { calendars: res.calendars || [], events: res.events || [], errors: res.errors || [], status: 'ok' };
           lsSet('househub.google', self.google);
@@ -827,10 +842,24 @@
   // ---- Cameras ---------------------------------------------------------------
   // Modern browsers (phones, newer iPads) can run go2rtc's own player, which
   // picks the best format (WebRTC/MSE/HLS). Old iPads get plain HLS video.
+  // Opens the Ring app (Android: straight in; iPhone/iPad: via the App Store page, which shows "Open").
+  function ringAppLink() {
+    if (/Android/i.test(navigator.userAgent)) {
+      return 'intent://#Intent;package=com.ringapp;S.browser_fallback_url=' + encodeURIComponent('https://play.google.com/store/apps/details?id=com.ringapp') + ';end';
+    }
+    return 'https://apps.apple.com/app/id926252661';
+  }
   var MODERN = (function () { try { return !!new Function('return async () => ({ ...{} })?.x'); } catch (e) { return false; } })();
   function cameras() {
     return Store.data.settings.cameras.map(function (c, i) {
       var cam = { id: i, name: c.name, type: c.type || 'mjpeg', url: c.url, refreshSeconds: c.refreshSeconds || 2 };
+      var w = Store.data.settings.google; // the House Hub worker (also used for Google)
+      if (cam.type === 'tuya') { cam.deviceId = c.deviceId; }
+      if (cam.type === 'ring') {
+        cam.deviceId = c.deviceId;
+        cam.url = w.url + '/ring/snapshot/' + encodeURIComponent(c.deviceId) + '?token=' + encodeURIComponent(w.token);
+        cam.refreshSeconds = 30;
+      }
       if (cam.type === 'go2rtc') {
         var base = (c.server || '').replace(/\/+$/, ''), src = encodeURIComponent(c.stream || '');
         cam.server = base;
@@ -868,10 +897,16 @@
         h += '<div class="cam"><div class="cam-inner" data-action="cam-full" data-id="' + c.id + '">' + Apps.cameras.media(c) +
           '<div class="cam-name flex between"><span>' + esc(c.name) + '</span><span>⤢</span></div></div></div>';
       });
-      return h + '</div><p class="muted small">Tap a camera for full screen. Streams stop when you leave this screen.</p>';
+      return h + '</div><p class="muted small">Tap a camera for full screen. Streams stop when you leave this screen. Ring shows its latest snapshot (refreshed every 30s); use the button for live view.</p>';
     },
     media: function (c, full) {
       var u = esc(c.url);
+      if (c.type === 'tuya') return '<video class="cam-media" data-cam="' + c.id + '" data-tuya="' + esc(c.deviceId) + '" autoplay muted playsinline webkit-playsinline></video>';
+      if (c.type === 'ring') {
+        return '<img class="cam-media" data-cam="' + c.id + '" data-src="' + u + '" alt="">' +
+          '<a class="btn primary small ring-live" data-action="ext-link" href="' + esc(ringAppLink()) + '" target="_blank">▶ Live view in Ring app</a>' +
+          '<div class="cam-age" data-age="' + c.id + '">Latest snapshot</div>';
+      }
       if (c.type === 'hls') return '<video class="cam-media" data-cam="' + c.id + '" src="' + u + '" autoplay muted playsinline webkit-playsinline></video>';
       if (c.type === 'iframe') return '<iframe class="cam-media" data-cam="' + c.id + '" src="' + u + '" frameborder="0" style="height:' + (full ? '100%' : '300px') + '"></iframe>';
       // mjpeg & snapshot both use <img>; snapshot is refreshed on a timer.
@@ -881,6 +916,23 @@
       var self = this;
       this.timers.forEach(clearInterval);
       this.timers = [];
+      function showError(el, text) {
+        if (!el.parentNode || el.parentNode.querySelector('.cam-err')) return;
+        var e = document.createElement('div');
+        e.className = 'cam-err';
+        e.textContent = text;
+        el.parentNode.appendChild(e);
+      }
+      // Tuya/LSC: ask the worker for a fresh live-stream link (they expire).
+      var vids = root.querySelectorAll('video[data-tuya]');
+      for (var v = 0; v < vids.length; v++) (function (video) {
+        Store.googleCall('GET', '/tuya/stream/' + encodeURIComponent(video.getAttribute('data-tuya')), null, function (err, res) {
+          if (err || !res || !res.url) return showError(video, 'Couldn\u2019t start the stream: ' + (err ? err.message : 'no link') + ' – tap Reload');
+          video.onerror = function () { showError(video, 'Stream stopped or this device can\u2019t play it – tap Reload'); };
+          video.src = res.url;
+          try { var pr = video.play(); if (pr && pr.catch) pr.catch(function () { /* shown by onerror, or autoplay needs a tap */ }); } catch (e) { /* old Safari */ }
+        });
+      })(vids[v]);
       var imgs = root.querySelectorAll('img.cam-media');
       for (var i = 0; i < imgs.length; i++) (function (img) {
         var cam = cameras()[+img.getAttribute('data-cam')];
@@ -895,11 +947,14 @@
             : 'Camera offline – tap Reload';
           img.parentNode.appendChild(e);
         };
+        var age = root.querySelector('[data-age="' + img.getAttribute('data-cam') + '"]');
+        function loaded() { if (age) age.textContent = 'Snapshot checked ' + fmtTime(new Date()); }
+        img.onload = loaded;
         img.src = bust();
-        if (cam && cam.type === 'snapshot') {
+        if (cam && (cam.type === 'snapshot' || cam.type === 'ring')) {
           self.timers.push(setInterval(function () {
             var next = new Image();
-            next.onload = function () { img.src = next.src; };
+            next.onload = function () { img.src = next.src; loaded(); };
             next.src = bust();
           }, (cam.refreshSeconds || 2) * 1000));
         }
@@ -1082,9 +1137,9 @@
         '<div class="text grow">This device is the wall display<div class="meta">Goes back home after 3 idle minutes and dims 23:00–06:00. Only affects this device.</div></div></div>' +
         '</div>' +
 
-        '<div class="section-label">Google Calendar sync (two-way)</div>' +
+        '<div class="section-label">House Hub worker (Google Calendar &amp; cameras)</div>' +
         '<div class="list" style="padding:16px">' +
-        '<p class="muted small" style="margin-top:0">Shows your Google calendars here and saves events you add here into Google. Needs the free House Hub worker (see README).</p>' +
+        '<p class="muted small" style="margin-top:0">Your free Cloudflare Worker (see README). It does two-way Google Calendar sync and fetches the Ring and LSC/Tuya cameras from the cloud – nothing needs to stay on at home.</p>' +
         '<label class="lbl">Worker URL</label><input class="field" id="g-url" placeholder="https://house-hub.yourname.workers.dev" value="' + esc(s.google.url) + '" autocapitalize="off" autocorrect="off">' +
         '<label class="lbl" style="margin-top:10px">Access token (HUB_TOKEN)</label><input class="field" id="g-token" type="password" value="' + esc(s.google.token) + '" autocapitalize="off" autocorrect="off">' +
         '<div class="flex wrap" style="margin-top:12px"><button class="btn primary" data-action="set-google" style="margin:0 10px 10px 0">Save &amp; test</button>' +
@@ -1109,16 +1164,42 @@
         '<form class="list" style="padding:16px" data-form="set-addcam">' +
         '<label class="lbl">Name</label><input class="field" id="cam-name" placeholder="Front door (Ring)">' +
         '<label class="lbl" style="margin-top:10px">Type</label><select class="field" id="cam-type">' +
-        '<option value="go2rtc">go2rtc camera (recommended)</option>' +
+        '<option value="tuya">LSC / Tuya camera – live, via the worker</option>' +
+        '<option value="ring">Ring doorbell / camera – snapshots, via the worker</option>' +
+        '<option value="go2rtc">go2rtc camera (needs a box at home)</option>' +
         '<option value="mjpeg">MJPEG stream URL</option><option value="hls">HLS video URL (.m3u8)</option>' +
         '<option value="snapshot">Snapshot image URL, refreshed every 2s</option><option value="iframe">Web page URL</option></select>' +
-        '<div id="cam-go2rtc-fields">' +
+        '<div id="cam-tuya-fields">' +
+        '<label class="lbl" style="margin-top:10px">Tuya device ID (Tuya IoT platform → your project → Devices)</label><input class="field" id="cam-device" placeholder="bf1234567890abcdef" autocapitalize="off" autocorrect="off">' +
+        '</div>' +
+        '<div id="cam-ring-fields" class="hidden">' +
+        '<p class="muted small">Log in to Ring once. Your password goes only to your own worker, which keeps the login refreshed.</p>' +
+        '<label class="lbl">Ring email</label><input class="field" id="ring-email" type="email" autocapitalize="off" autocorrect="off">' +
+        '<label class="lbl" style="margin-top:10px">Ring password</label><input class="field" id="ring-pass" type="password">' +
+        '<div id="ring-code-row" class="hidden"><label class="lbl" style="margin-top:10px" id="ring-code-lbl">Code</label><input class="field" id="ring-code" inputmode="numeric" autocomplete="one-time-code"></div>' +
+        '<button class="btn" type="button" data-action="ring-login" style="margin-top:12px">Log in to Ring</button>' +
+        '<div id="ring-devs" style="margin-top:12px"></div>' +
+        '</div>' +
+        '<div id="cam-go2rtc-fields" class="hidden">' +
         '<label class="lbl" style="margin-top:10px">go2rtc address</label><input class="field" id="cam-server" placeholder="http://192.168.1.10:1984" autocapitalize="off" autocorrect="off">' +
         '<label class="lbl" style="margin-top:10px">Stream name (as in go2rtc.yaml)</label><input class="field" id="cam-stream" placeholder="ring_doorbell" autocapitalize="off" autocorrect="off">' +
         '</div>' +
         '<div id="cam-url-fields" class="hidden"><label class="lbl" style="margin-top:10px">Stream URL</label><input class="field" id="cam-url" placeholder="http://192.168.1.10:1984/api/stream.mjpeg?src=garage" autocapitalize="off" autocorrect="off"></div>' +
-        '<button class="btn primary" type="submit" style="margin-top:12px">Add camera</button>' +
+        '<button class="btn primary" type="submit" style="margin-top:12px" id="cam-submit">Add camera</button>' +
         '</form>';
+    },
+    ringDevices: function () {
+      var box = $('ring-devs');
+      box.innerHTML = '<span class="muted small">Finding your Ring devices…</span>';
+      Store.googleCall('GET', '/ring/devices', null, function (err, res) {
+        if (err) { box.innerHTML = '<span class="small overdue">' + esc(err.message) + '</span>'; return; }
+        var have = Store.data.settings.cameras.map(function (c) { return c.type === 'ring' ? c.deviceId : null; });
+        box.innerHTML = (res.devices || []).length ? res.devices.map(function (d) {
+          var added = have.indexOf(d.id) >= 0;
+          return '<div class="flex center between" style="margin-bottom:8px"><span>🔔 ' + esc(d.name) + (d.battery != null ? ' <span class="muted small">(battery ' + d.battery + '%)</span>' : '') + '</span>' +
+            (added ? '<span class="muted small">✓ Added</span>' : '<button class="btn primary small" type="button" data-action="ring-add" data-id="' + esc(d.id) + '" data-name="' + esc(d.name) + '">Add</button>') + '</div>';
+        }).join('') : '<span class="muted small">No Ring devices found on this account.</span>';
+      });
     },
     render: function () {
       var st = $('set-status');
@@ -1135,7 +1216,8 @@
       }).join('') + '</div>' : '';
       if (Store.calendar.errors.length) $('set-cals').innerHTML += '<p class="small overdue">' + esc(Store.calendar.errors.join(' · ')) + '</p>';
       var gs = $('g-status'), G = Store.google;
-      if (!Store.googleOn()) { gs.className = 'small muted'; gs.textContent = 'Not connected.'; }
+      if (!Store.workerOn()) { gs.className = 'small muted'; gs.textContent = 'Not connected.'; }
+      else if (G.status === 'unavailable') { gs.className = 'small sync ok'; gs.textContent = '● Worker connected (Google Calendar isn\u2019t set up on it yet – cameras can still use it)'; }
       else if (G.status === 'error') { gs.className = 'small sync bad'; gs.textContent = '● ' + G.errors.join('; '); }
       else if (G.status === 'ok') {
         gs.className = 'small sync ' + (G.errors.length ? 'bad' : 'ok');
@@ -1143,7 +1225,8 @@
           (G.errors.length ? ' · Problems: ' + G.errors.join('; ') : '');
       } else { gs.className = 'small muted'; gs.textContent = 'Checking…'; }
       $('set-cams').innerHTML = s.cameras.length ? '<div class="list">' + s.cameras.map(function (c, i) {
-        return '<div class="row flex center"><div class="text grow">' + esc(c.name) + '<div class="meta">' + esc(c.type) + ' · ' + esc(c.type === 'go2rtc' ? c.server + ' → ' + c.stream : c.url) + '</div></div>' +
+        var detail = c.type === 'go2rtc' ? c.server + ' → ' + c.stream : c.type === 'tuya' || c.type === 'ring' ? 'device ' + c.deviceId : c.url;
+        return '<div class="row flex center"><div class="text grow">' + esc(c.name) + '<div class="meta">' + esc(c.type) + ' · ' + esc(detail) + '</div></div>' +
           '<button class="del" data-action="set-delcam" data-i="' + i + '">✕</button></div>';
       }).join('') + '</div>' : '';
     },
@@ -1209,7 +1292,14 @@
       'set-delcal': function (el) { Store.data.settings.calendars.splice(+el.getAttribute('data-i'), 1); Store.save('settings'); },
       'set-addcam': function () {
         var type = $('cam-type').value, name = $('cam-name').value.trim() || 'Camera';
-        if (type === 'go2rtc') {
+        if (type === 'ring') return Apps.settings.actions['ring-login']();
+        if ((type === 'tuya') && !Store.workerOn()) return alert('Set up the House Hub worker above first.');
+        if (type === 'tuya') {
+          var dev = $('cam-device').value.trim();
+          if (!dev) return alert('Enter the Tuya device ID.');
+          Store.data.settings.cameras.push({ name: name === 'Camera' ? 'Garage' : name, type: 'tuya', deviceId: dev });
+          $('cam-device').value = '';
+        } else if (type === 'go2rtc') {
           var server = $('cam-server').value.trim().replace(/\/+$/, ''), stream = $('cam-stream').value.trim();
           if (!/^https?:\/\//.test(server) || !stream) return alert('Enter the go2rtc address (e.g. http://192.168.1.10:1984) and the stream name.');
           Store.data.settings.cameras.push({ name: name, type: type, server: server, stream: stream });
@@ -1223,6 +1313,29 @@
         $('cam-name').value = '';
         Store.save('settings');
       },
+      'ring-login': function () {
+        if (!Store.workerOn()) return alert('Set up the House Hub worker above first.');
+        var body = { email: $('ring-email').value.trim(), password: $('ring-pass').value, code: $('ring-code').value.trim() };
+        if (!body.email || !body.password) return alert('Enter your Ring email and password.');
+        $('ring-devs').innerHTML = '<span class="muted small">Logging in…</span>';
+        Store.googleCall('POST', '/ring/login', body, function (err, res) {
+          if (err) { $('ring-devs').innerHTML = '<span class="small overdue">' + esc(err.message) + '</span>'; return; }
+          if (res.needCode) {
+            $('ring-code-row').className = '';
+            $('ring-code-lbl').textContent = res.message;
+            $('ring-devs').innerHTML = '<span class="muted small">Enter the code, then tap “Log in to Ring” again.</span>';
+            $('ring-code').focus();
+            return;
+          }
+          $('ring-pass').value = ''; $('ring-code').value = ''; $('ring-code-row').className = 'hidden';
+          Apps.settings.ringDevices();
+        });
+      },
+      'ring-add': function (el) {
+        Store.data.settings.cameras.push({ name: el.getAttribute('data-name'), type: 'ring', deviceId: el.getAttribute('data-id') });
+        Store.save('settings');
+        Apps.settings.ringDevices();
+      },
       'set-delcam': function (el) { Store.data.settings.cameras.splice(+el.getAttribute('data-i'), 1); Store.save('settings'); }
     }
   };
@@ -1231,6 +1344,19 @@
   function notifications() {
     var out = [], now = new Date(), today = dayKey(now), tomorrow = dayKey(addDays(now, 1));
     var events = allEvents();
+
+    // Ring doorbell: recent presses / motion, low battery.
+    Store.ring.devices.forEach(function (d) {
+      var ding = null, motion = null;
+      d.events.forEach(function (e) {
+        var at = parseISO(e.at), mins = (now - at) / 60000;
+        if (e.kind === 'ding' && mins < 30 && (!ding || at > ding)) ding = at;
+        if (e.kind === 'motion' && mins < 10 && (!motion || at > motion)) motion = at;
+      });
+      if (ding) out.push({ cls: 'warn', icon: '🔔', app: 'cameras', title: 'Someone rang the doorbell at ' + fmtTime(ding), sub: d.name + ' · tap to see the camera' });
+      else if (motion) out.push({ cls: '', icon: '👀', app: 'cameras', title: 'Motion at ' + d.name + ' (' + fmtTime(motion) + ')', sub: 'Tap to see the camera' });
+      if (d.battery != null && d.battery <= 20) out.push({ cls: 'warn', icon: '🔋', title: d.name + ' battery is at ' + d.battery + '%', sub: 'Time to charge the Ring doorbell' });
+    });
 
     // Household notes (dismissable).
     Store.data.notes.forEach(function (n) {
@@ -1423,9 +1549,12 @@
 
   document.addEventListener('change', function (e) {
     if (e.target.id === 'cam-type') {
-      var g = e.target.value === 'go2rtc';
-      $('cam-go2rtc-fields').className = g ? '' : 'hidden';
-      $('cam-url-fields').className = g ? 'hidden' : '';
+      var t = e.target.value, url = !/^(tuya|ring|go2rtc)$/.test(t);
+      $('cam-tuya-fields').className = t === 'tuya' ? '' : 'hidden';
+      $('cam-ring-fields').className = t === 'ring' ? '' : 'hidden';
+      $('cam-go2rtc-fields').className = t === 'go2rtc' ? '' : 'hidden';
+      $('cam-url-fields').className = url ? '' : 'hidden';
+      $('cam-submit').className = t === 'ring' ? 'hidden' : 'btn primary';
     }
   }, false);
 

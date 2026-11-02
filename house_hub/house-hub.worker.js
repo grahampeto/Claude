@@ -1,20 +1,31 @@
-// House Hub helper – a free Cloudflare Worker. Two jobs:
+// House Hub helper – a free Cloudflare Worker. Everything that needs a
+// "server" runs here in Cloudflare's cloud, so nothing has to stay on at home.
 //
 //  1. Calendar feed proxy:   GET /?url=<ics url>
-//     Lets the browser read Google / iCloud / Outlook .ics feeds (they don't
+//     Lets the browser read iCloud / Outlook / Google .ics feeds (they don't
 //     send CORS headers). Only calendar hosts are allowed.
 //
-//  2. Google Calendar sync:  /google/...   (needs the secrets below)
-//     Reads events from your Google calendars and creates / deletes events,
-//     using a Google service account that you share your calendars with.
-//     No sign-in on the iPad, nothing that expires.
+//  2. Google Calendar sync:  /google/...
+//     Reads, creates and deletes events using a Google service account that
+//     you share your calendars with. No sign-in on the iPad, nothing expires.
+//
+//  3. Tuya / LSC cameras:    /tuya/stream/<deviceId>
+//     Asks Tuya's official cloud API for a short-lived live HLS stream link.
+//
+//  4. Ring doorbell:         /ring/...
+//     Latest snapshot + recent dings/motion, via Ring's unofficial API
+//     (the same one Home Assistant uses). Ring can change it at any time.
 //
 // Secrets / variables (Worker → Settings → Variables and Secrets):
 //   HUB_TOKEN                  any long random string; also typed into House Hub Settings
-//   GOOGLE_SERVICE_ACCOUNT     the whole service-account JSON key file (as a Secret)
-//   GOOGLE_CALENDAR_IDS        comma-separated calendar IDs, e.g.
-//                              you@gmail.com,family123@group.calendar.google.com
-//                              (the first one is where new events go by default)
+//   GOOGLE_SERVICE_ACCOUNT     the whole service-account JSON key file (Secret)
+//   GOOGLE_CALENDAR_IDS        comma-separated calendar IDs (first = default for new events)
+//   TUYA_CLIENT_ID             Tuya IoT project Access ID
+//   TUYA_CLIENT_SECRET         Tuya IoT project Access Secret (Secret)
+//   TUYA_ENDPOINT              optional, default https://openapi.tuyaeu.com (Central Europe)
+// Bindings (Worker → Settings → Bindings):
+//   HUB_KV                     a KV namespace – stores the Ring login
+// Each part is optional: only set up the ones you use.
 // See house_hub/README.md for step-by-step setup.
 
 const ICS_HOSTS = ['calendar.google.com', 'outlook.office365.com', 'outlook.live.com'];
@@ -189,28 +200,194 @@ async function deleteEvent(env, calId, eventId) {
   return json({ ok: true });
 }
 
+// ---------------------------------------------------------------- Tuya (LSC cameras)
+// Signing follows Tuya's "cloud authorization" spec: HMAC-SHA256 over
+// client_id [+ access_token] + t + nonce + stringToSign.
+const enc = new TextEncoder();
+function hex(buf) { return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join(''); }
+async function sha256Hex(text) { return hex(await crypto.subtle.digest('SHA-256', enc.encode(text))); }
+async function hmacHex(key, text) {
+  const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return hex(await crypto.subtle.sign('HMAC', k, enc.encode(text))).toUpperCase();
+}
+
+let tuyaToken = { token: null, exp: 0 };
+
+async function tuyaRequest(env, method, path, body, useToken = true) {
+  const base = (env.TUYA_ENDPOINT || 'https://openapi.tuyaeu.com').replace(/\/+$/, '');
+  const bodyText = body ? JSON.stringify(body) : '';
+  const t = String(Date.now());
+  const stringToSign = [method, await sha256Hex(bodyText), '', path].join('\n');
+  const token = useToken ? await tuyaAccessToken(env) : '';
+  const sign = await hmacHex(env.TUYA_CLIENT_SECRET, env.TUYA_CLIENT_ID + token + t + stringToSign);
+  const headers = { client_id: env.TUYA_CLIENT_ID, sign, t, sign_method: 'HMAC-SHA256', nonce: '' };
+  if (token) headers.access_token = token;
+  if (bodyText) headers['Content-Type'] = 'application/json';
+  const res = await fetch(base + path, { method, headers, body: bodyText || undefined });
+  const data = await res.json();
+  if (!data.success) {
+    if (useToken && (data.code === 1010 || data.code === 1011)) tuyaToken = { token: null, exp: 0 }; // token expired/invalid
+    throw new Error('Tuya: ' + (data.msg || 'error ' + data.code));
+  }
+  return data.result;
+}
+
+async function tuyaAccessToken(env) {
+  if (tuyaToken.token && Date.now() < tuyaToken.exp - 60000) return tuyaToken.token;
+  const r = await tuyaRequest(env, 'GET', '/v1.0/token?grant_type=1', null, false);
+  tuyaToken = { token: r.access_token, exp: Date.now() + r.expire_time * 1000 };
+  return tuyaToken.token;
+}
+
+async function tuyaStream(env, deviceId) {
+  const r = await tuyaRequest(env, 'POST', '/v1.0/devices/' + encodeURIComponent(deviceId) + '/stream/actions/allocate', { type: 'hls' });
+  return json({ url: r.url });
+}
+
+// ---------------------------------------------------------------- Ring
+// Unofficial API (as used by ring-client-api / Home Assistant). The refresh
+// token rotates on every use, so it is kept in KV.
+const RING_OAUTH = 'https://oauth.ring.com/oauth/token';
+const RING_API = 'https://api.ring.com/clients_api';
+let ringAccess = { token: null, exp: 0 };
+
+async function ringHardwareId(env) {
+  let id = await env.HUB_KV.get('ring_hardware_id');
+  if (!id) { id = crypto.randomUUID(); await env.HUB_KV.put('ring_hardware_id', id); }
+  return id;
+}
+
+async function ringOAuth(env, body, code) {
+  const res = await fetch(RING_OAUTH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      '2fa-support': 'true',
+      '2fa-code': code || '',
+      hardware_id: await ringHardwareId(env),
+      'User-Agent': 'android:com.ringapp',
+    },
+    body: JSON.stringify(Object.assign({ client_id: 'ring_official_android', scope: 'client' }, body)),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+
+async function ringLogin(env, request) {
+  const b = await request.json();
+  const r = await ringOAuth(env, { grant_type: 'password', username: b.email, password: b.password }, b.code);
+  if (r.status === 412) {
+    const where = r.data.tsv_state === 'totp' ? 'your authenticator app' : r.data.phone ? r.data.phone : 'your ' + (r.data.tsv_state || 'phone');
+    return json({ needCode: true, message: 'Enter the code Ring sent to ' + where }, 200);
+  }
+  if (r.status !== 200 || !r.data.refresh_token) {
+    return json({ error: r.data.error_description || r.data.error || 'Ring login failed (' + r.status + ')' }, 401);
+  }
+  await env.HUB_KV.put('ring_refresh_token', r.data.refresh_token);
+  ringAccess = { token: r.data.access_token, exp: Date.now() + (r.data.expires_in || 3600) * 1000 };
+  // Register this "device" with Ring (shows in Ring's Control Center as House Hub).
+  await ringFetch(env, '/session', {
+    method: 'POST',
+    body: JSON.stringify({ device: { hardware_id: await ringHardwareId(env), metadata: { api_version: 11, device_model: 'House Hub' }, os: 'android' } }),
+  }).catch(() => {});
+  return json({ ok: true });
+}
+
+async function ringToken(env) {
+  if (ringAccess.token && Date.now() < ringAccess.exp - 60000) return ringAccess.token;
+  const refresh = await env.HUB_KV.get('ring_refresh_token');
+  if (!refresh) throw new Error('Not logged in to Ring yet');
+  const r = await ringOAuth(env, { grant_type: 'refresh_token', refresh_token: refresh });
+  if (r.status !== 200 || !r.data.access_token) {
+    throw new Error('Ring login expired – log in again in House Hub Settings');
+  }
+  if (r.data.refresh_token) await env.HUB_KV.put('ring_refresh_token', r.data.refresh_token);
+  ringAccess = { token: r.data.access_token, exp: Date.now() + (r.data.expires_in || 3600) * 1000 };
+  return ringAccess.token;
+}
+
+async function ringFetch(env, path, init = {}) {
+  const url = /^https:/.test(path) ? path : RING_API + path;
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: 'Bearer ' + (await ringToken(env)),
+      hardware_id: await ringHardwareId(env),
+      'User-Agent': 'android:com.ringapp',
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  });
+  if (!res.ok) throw new Error('Ring ' + res.status);
+  return res;
+}
+
+async function ringDevices(env) {
+  const d = await (await ringFetch(env, '/ring_devices')).json();
+  const list = [].concat(d.doorbots || [], d.authorized_doorbots || [], d.stickup_cams || []);
+  const out = await Promise.all(list.map(async (x) => {
+    let events = [];
+    try {
+      const h = await (await ringFetch(env, '/doorbots/' + x.id + '/history?limit=5')).json();
+      events = (h || []).map((e) => ({ kind: e.kind, at: e.created_at }));
+    } catch (e) { /* history is optional */ }
+    return { id: String(x.id), name: x.description || 'Ring', battery: x.battery_life != null ? Number(x.battery_life) : null, events };
+  }));
+  return json({ devices: out });
+}
+
+async function ringSnapshot(env, id) {
+  let res;
+  try {
+    res = await ringFetch(env, 'https://app-snaps.ring.com/snapshots/next/' + encodeURIComponent(id) + '?extras=force', { headers: { Accept: 'image/jpeg' } });
+  } catch (e) {
+    res = await ringFetch(env, '/snapshots/image/' + encodeURIComponent(id), { headers: { Accept: 'image/jpeg' } });
+  }
+  return new Response(res.body, { headers: { ...CORS, 'Content-Type': res.headers.get('Content-Type') || 'image/jpeg', 'Cache-Control': 'no-store' } });
+}
+
 // ---------------------------------------------------------------- router
+// The access token comes in an Authorization header, or as ?token= for
+// things the page loads as plain images (Ring snapshots).
+function authorized(request, url, env) {
+  const auth = request.headers.get('Authorization') || '';
+  return !!env.HUB_TOKEN && (auth === 'Bearer ' + env.HUB_TOKEN || url.searchParams.get('token') === env.HUB_TOKEN);
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+    const p = url.pathname;
 
-    if (url.pathname === '/' && url.searchParams.get('url')) return icsProxy(url.searchParams.get('url'));
+    if (p === '/' && url.searchParams.get('url')) return icsProxy(url.searchParams.get('url'));
+    if (!/^\/(google|tuya|ring)\//.test(p)) return new Response('House Hub worker is running.', { headers: CORS });
+    if (!env.HUB_TOKEN) return json({ error: 'HUB_TOKEN is not set on the worker' }, 501);
+    if (!authorized(request, url, env)) return json({ error: 'wrong access token' }, 401);
 
-    if (url.pathname.startsWith('/google/')) {
-      if (!env.HUB_TOKEN || !env.GOOGLE_SERVICE_ACCOUNT) return json({ error: 'Google sync is not set up on the worker' }, 501);
-      const auth = request.headers.get('Authorization') || '';
-      if (auth !== 'Bearer ' + env.HUB_TOKEN) return json({ error: 'wrong access token' }, 401);
-      try {
-        if (url.pathname === '/google/events' && request.method === 'GET') return await listEvents(env, url);
-        if (url.pathname === '/google/events' && request.method === 'POST') return await createEvent(env, request);
-        const m = /^\/google\/events\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+    try {
+      if (p.startsWith('/google/')) {
+        if (!env.GOOGLE_SERVICE_ACCOUNT) return json({ error: 'Google sync is not set up on the worker' }, 501);
+        if (p === '/google/events' && request.method === 'GET') return await listEvents(env, url);
+        if (p === '/google/events' && request.method === 'POST') return await createEvent(env, request);
+        const m = /^\/google\/events\/([^/]+)\/([^/]+)$/.exec(p);
         if (m && request.method === 'DELETE') return await deleteEvent(env, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
-      } catch (e) {
-        return json({ error: e.message }, 502);
       }
-      return json({ error: 'not found' }, 404);
+      if (p.startsWith('/tuya/')) {
+        if (!env.TUYA_CLIENT_ID || !env.TUYA_CLIENT_SECRET) return json({ error: 'Tuya is not set up on the worker' }, 501);
+        const m = /^\/tuya\/stream\/([^/]+)$/.exec(p);
+        if (m && request.method === 'GET') return await tuyaStream(env, decodeURIComponent(m[1]));
+      }
+      if (p.startsWith('/ring/')) {
+        if (!env.HUB_KV) return json({ error: 'Ring needs the HUB_KV binding on the worker' }, 501);
+        if (p === '/ring/login' && request.method === 'POST') return await ringLogin(env, request);
+        if (p === '/ring/devices' && request.method === 'GET') return await ringDevices(env);
+        const m = /^\/ring\/snapshot\/([^/]+)$/.exec(p);
+        if (m && request.method === 'GET') return await ringSnapshot(env, decodeURIComponent(m[1]));
+      }
+    } catch (e) {
+      return json({ error: e.message }, 502);
     }
-    return new Response('House Hub worker is running.', { headers: CORS });
+    return json({ error: 'not found' }, 404);
   },
 };
