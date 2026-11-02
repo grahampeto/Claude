@@ -147,11 +147,10 @@ fieldset.seg input { width: auto; }
         <input id="apptDate" type="date">
         <button class="primary" id="btnApptSave">Save</button>
       </div>
-      <p class="muted" id="apptHint" style="margin:6px 0 0"></p>
     </section>
     <div class="actions">
       <button class="primary big" id="btnFill">Fill dispenser</button>
-      <button class="primary big" id="btnPickup">Got pills from pharmacy</button>
+      <button class="primary big" id="btnPickup">Restock</button>
     </div>
     <section class="card">
       <div class="head"><h2>Pills on hand</h2></div>
@@ -163,7 +162,6 @@ fieldset.seg input { width: auto; }
   <div class="view" id="view-doses" hidden>
     <section class="card">
       <div class="head"><h2>Weekly doses</h2><button class="link" id="btnAddMed">+ Add medication</button></div>
-      <p class="muted" style="margin:0 0 4px">Tap ⋯ to change a dose after a checkup, or to pause or stop a medication.</p>
       <div id="doseRows"></div>
     </section>
     <section class="card">
@@ -201,10 +199,7 @@ fieldset.seg input { width: auto; }
     <h2 id="medTitle">Add medication</h2>
     <label for="mName">Name and strength</label>
     <input id="mName" placeholder="e.g. Prednisone 5 mg">
-    <div class="row">
-      <div id="mPerWeekWrap"><label for="mPerWeek" id="mPerWeekLabel">Pills per week</label><input id="mPerWeek" type="number" min="0.05" step="any" inputmode="decimal"></div>
-      <div><label for="mPack">Pills per pharmacy pickup</label><input id="mPack" type="number" min="1" inputmode="numeric"></div>
-    </div>
+    <div id="mPerWeekWrap"><label for="mPerWeek" id="mPerWeekLabel">Pills per week</label><input id="mPerWeek" type="number" min="0.05" step="any" inputmode="decimal"></div>
     <div class="row">
       <div><label for="mFreq">How often</label><select id="mFreq"><option value="weekly">Every week</option><option value="monthly">Once a month</option></select></div>
       <div id="mDayWrap"><label for="mDay">On day of the month</label><input id="mDay" type="number" min="1" max="31" inputmode="numeric"></div>
@@ -244,16 +239,16 @@ fieldset.seg input { width: auto; }
   </form>
 </dialog>
 
-<!-- Pharmacy pickup -->
+<!-- Restock -->
 <dialog id="dlgPickup">
   <form method="dialog" id="formPickup">
-    <h2>Pharmacy pickup</h2>
+    <h2>Restock</h2>
     <label for="pDate">Date</label><input id="pDate" type="date">
     <p class="muted">Type how many pills of each you received. Leave the rest empty.</p>
     <div id="pickupRows"></div>
     <div class="dialog-actions">
       <button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary">Add to stock</button>
+      <button type="submit" class="primary">Restock</button>
     </div>
   </form>
 </dialog>
@@ -336,7 +331,7 @@ function showTab() {
 window.addEventListener("hashchange", showTab);
 
 // ---------- state ----------
-// Each med: { id, name, perWeek, pack, stock, disp, dispAsOf, active, carry }
+// Each med: { id, name, perWeek, stock, disp, dispAsOf, active, carry }
 //   stock  = loose pills at home (outside the dispenser)
 //   disp   = pills in the dispenser on dispAsOf; taken at perWeek/7 a day from then on
 //   active = false while paused (e.g. a strength not used at the current dose)
@@ -477,12 +472,7 @@ function render() {
   const appt = upcomingAppt(today), hw = state.settings.horizonWeeks;
   const labels = appt ? LABEL_APPT : LABEL;
   // The saved date stays until the day after it; then the box shows empty for the next one.
-  const last = state.settings.apptDate && !appt ? state.settings.apptDate : null;
   if (document.activeElement !== $("apptDate")) $("apptDate").value = appt || "";
-  $("apptHint").textContent = appt
-    ? `You order at this appointment. Anything that runs out before ${fmt(addDays(appt, hw * 7))} (${hw} weeks after it) is flagged.`
-    : last ? `Your appointment on ${fmt(last)} has passed. Enter the next date once you have it.`
-           : `Pick the date of your next appointment and tap Save. It stays until that day has passed.`;
 
   let html;
   if (!state.meds.length) {
@@ -490,8 +480,6 @@ function render() {
   } else if (!projs.length) {
     html = `<div class="banner warn"><strong>No medications marked as taking</strong>On the Weekly doses tab, set the ones you're on now to “Taking”.</div>`;
   } else {
-    const nf = nextFillDate();
-    const fillLine = nf ? `<div class="sub">Next dispenser fill: ${fmt(nf)} (${rel(diffDays(nf, today))})</div>` : "";
     const item = x => `<li>${esc(x.m.name)}</li>`;
     const now = projs.filter(x => x.p.level === "now"), order = projs.filter(x => x.p.level === "order");
     const base = appt || today, horizon = addDays(base, hw * 7);
@@ -499,21 +487,20 @@ function render() {
       const when = `${fmt(appt)} (${rel(diffDays(appt, today))})`;
       const orderList = order.length ? `<ul>${order.map(item).join("")}</ul>` : "";
       if (now.length) {
-        html = `<div class="banner bad"><strong>Order now</strong>These run out before your appointment on ${when}. Place a pharmacy order now:<ul>${now.map(item).join("")}</ul>${fillLine}</div>` +
+        html = `<div class="banner bad"><strong>Order now</strong>These run out before your appointment on ${when}. Place a pharmacy order now:<ul>${now.map(item).join("")}</ul></div>` +
           (order.length ? `<div class="banner warn"><strong>Order at your appointment: ${when}</strong>These run out within ${hw} weeks after it:${orderList}</div>` : "");
       } else if (order.length) {
-        html = `<div class="banner warn"><strong>Order at your appointment: ${when}</strong>These run out within ${hw} weeks after it:${orderList}${fillLine}</div>`;
+        html = `<div class="banner warn"><strong>Order at your appointment: ${when}</strong>These run out within ${hw} weeks after it:${orderList}</div>`;
       } else {
-        html = `<div class="banner ok"><strong>Next appointment: ${when}</strong>Nothing to order. Everything lasts past ${fmt(horizon)}, ${hw} weeks after the appointment.${fillLine}</div>`;
+        html = `<div class="banner ok"><strong>Next appointment: ${when}</strong>Nothing to order. Everything lasts past ${fmt(horizon)}, ${hw} weeks after the appointment.</div>`;
       }
     } else if (now.length || order.length) {
-      html = `<div class="banner warn"><strong>Order soon</strong>These run out within the next ${hw} weeks:<ul>${[...now, ...order].map(item).join("")}</ul><div class="sub">Add your next appointment date below to plan your order around it.</div>${fillLine}</div>`;
+      html = `<div class="banner warn"><strong>Order soon</strong>These run out within the next ${hw} weeks:<ul>${[...now, ...order].map(item).join("")}</ul><div class="sub">Add your next appointment date below to plan your order around it.</div></div>`;
     } else {
-      html = `<div class="banner ok"><strong>Nothing to order</strong>Everything lasts past ${fmt(horizon)}. Add your next appointment date below to plan your order around it.${fillLine}</div>`;
+      html = `<div class="banner ok"><strong>Nothing to order</strong>Everything lasts past ${fmt(horizon)}. Add your next appointment date below to plan your order around it.</div>`;
     }
   }
   $("banner").innerHTML = html;
-  $("btnFill").textContent = `Fill dispenser (${num(wk)} week${wk === 1 ? "" : "s"})`;
 
   const activeHtml = projs.map(({ m, p }) => `
     <div class="med">
@@ -635,7 +622,6 @@ function openMed(id) {
   $("mFreq").value = editing && isMonthly(editing) ? "monthly" : "weekly";
   $("mDay").value = editing && isMonthly(editing) ? editing.monthDay : 1;
   syncFreq();
-  $("mPack").value = editing ? editing.pack : 30;
   $("mStock").value = editing ? num(editing.stock) : "";
   $("mDisp").value = editing ? (editing.active ? pills(dispLeft(editing, todayISO())) : 0) : 0;
   $("btnDeleteMed").hidden = !editing;
@@ -659,25 +645,24 @@ $("btnDeleteMed").onclick = async () => {
 };
 $("formMed").addEventListener("submit", e => {
   e.preventDefault();
-  const name = $("mName").value.trim(), perWeek = +$("mPerWeek").value, pack = +$("mPack").value,
+  const name = $("mName").value.trim(), perWeek = +$("mPerWeek").value,
         stock = $("mStock").value === "" ? NaN : +$("mStock").value, disp = +$("mDisp").value || 0;
   if (!name) { $("medErr").textContent = "Enter the medication's name."; return; }
   if (!editing && !(perWeek > 0)) { $("medErr").textContent = "The number of pills must be more than 0."; return; }
   const monthly = $("mFreq").value === "monthly", day = Math.round(+$("mDay").value);
   if (monthly && !(day >= 1 && day <= 31)) { $("medErr").textContent = "Enter a day of the month from 1 to 31."; return; }
-  if (!(pack > 0)) { $("medErr").textContent = "Pills per pickup must be more than 0."; return; }
   if (!(stock >= 0) || !(disp >= 0)) { $("medErr").textContent = "Enter how many pills you have now. Use 0 if none."; return; }
   record(editing ? `Corrected counts for ${name}: ${num(stock)} loose, ${num(disp)} in dispenser` : `Added ${name} at ${num(perWeek)} ${$("mFreq").value === "monthly" ? "a month" : "a week"} (${num(stock)} loose, ${num(disp)} in dispenser)`);
   const today = todayISO();
   if (editing) {
     const m = state.meds.find(x => x.id === editing.id);
-    Object.assign(m, { name, pack, stock: m.active ? stock : stock + disp, disp: m.active ? disp : 0, dispAsOf: today, carry: 0 });
+    Object.assign(m, { name, stock: m.active ? stock : stock + disp, disp: m.active ? disp : 0, dispAsOf: today, carry: 0 });
     if (monthly && !isMonthly(m)) { m.perMonth = 1; m.monthDay = day; }
     else if (monthly) m.monthDay = day;
     else if (!monthly && isMonthly(m)) { m.perWeek = m.perMonth * 12 / 52; delete m.monthDay; delete m.perMonth; }
   } else state.meds.push(monthly
-      ? { id: uid(), name, perWeek: perWeek * 12 / 52, perMonth: perWeek, monthDay: day, pack, stock, disp, dispAsOf: today, active: true, carry: 0 }
-      : { id: uid(), name, perWeek, pack, stock, disp, dispAsOf: today, active: true, carry: 0 });
+      ? { id: uid(), name, perWeek: perWeek * 12 / 52, perMonth: perWeek, monthDay: day, stock, disp, dispAsOf: today, active: true, carry: 0 }
+      : { id: uid(), name, perWeek, stock, disp, dispAsOf: today, active: true, carry: 0 });
   $("dlgMed").close(); save(); toast(`Saved ${name}`);
 });
 
@@ -685,7 +670,7 @@ $("formMed").addEventListener("submit", e => {
 $("btnPickup").onclick = () => {
   $("pDate").value = todayISO();
   const row = m => `
-    <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}<span class="note">usually ${num(m.pack)}</span></label>
+    <div class="qty-row"><label for="pk_${m.id}">${esc(m.name)}</label>
     <input id="pk_${m.id}" type="number" min="0" step="any" inputmode="numeric" placeholder="0"></div>`;
   const off = [...byStatus("paused"), ...byStatus("stopped")];
   $("pickupRows").innerHTML = active().map(row).join("") +
@@ -698,9 +683,9 @@ $("formPickup").addEventListener("submit", e => {
   const got = state.meds.map(m => [m, Math.max(0, +$("pk_" + m.id).value || 0)]).filter(([, q]) => q > 0);
   $("dlgPickup").close();
   if (!got.length) { toast("Nothing entered, so nothing was added."); return; }
-  record(`Pharmacy pickup: ${got.map(([m, q]) => `${num(q)} × ${m.name}`).join(", ")}`, { date: $("pDate").value || todayISO(), kind: "pickup" });
+  record(`Restocked: ${got.map(([m, q]) => `${num(q)} × ${m.name}`).join(", ")}`, { date: $("pDate").value || todayISO(), kind: "pickup" });
   got.forEach(([m, q]) => { m.stock += q; });
-  save(); toast("Added to stock");
+  save(); toast("Restocked");
 });
 
 // ---------- dispenser fill ----------
