@@ -92,8 +92,7 @@ dialog form { padding: 18px; }
 .group-label { font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 16px 0 4px; }
 .group-label.first { margin-top: 0; }
 .group-label + .med { border-top: none; padding-top: 4px; }
-.appt-row { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 10px; align-items: center; }
-.appt-row label { margin: 0; color: var(--ink); font-weight: 700; font-size: 1rem; }
+.appt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 select.status { padding: 4px 8px; font-size: .85rem; width: auto; border-radius: 8px; }
 label.check { display: flex; align-items: center; gap: 10px; color: var(--ink); margin-top: 14px; }
 label.check input { width: 20px; height: 20px; }
@@ -104,20 +103,25 @@ label.check input { width: 20px; height: 20px; }
 .tabs a[aria-current="page"] { background: var(--card); color: var(--ink); }
 .tabs a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .view { display: flex; flex-direction: column; gap: 16px; }
-.dose-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 92px; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
-.dose-row.top { border-top: none; padding: 0 0 6px; font-size: .78rem; color: var(--muted); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-.dose-row input[type=number] { text-align: right; padding: 8px; }
-.dose-row .per-fill { font-size: .9rem; color: var(--muted); text-align: right; }
-.dose-row.off .dose-name b { color: var(--muted); }
+.dose-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); }
+.dose-row:first-child, .group-label + .dose-row { border-top: none; }
 .dose-name { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.dose-name label.check { margin: 0; font-size: .85rem; color: var(--muted); gap: 6px; }
-.dose-name label.check input { width: 16px; height: 16px; }
-.dose-row.changed input[type=number] { border-color: var(--accent); }
-.save-bar { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
+.dose-row.off .dose-name b { color: var(--muted); }
+button.kebab { border: none; background: none; color: var(--muted); font-size: 1.4rem; line-height: 1; padding: 6px 10px; border-radius: 8px; }
+button.kebab:hover { background: var(--line); color: var(--ink); }
+details.off-group { border-top: 1px solid var(--line); margin-top: 4px; }
+details.off-group summary { cursor: pointer; padding: 12px 0 4px; color: var(--muted); font-weight: 700; font-size: .95rem; }
+details.off-group summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.appt-label { margin: 0 0 8px; color: var(--ink); font-weight: 700; font-size: 1rem; }
+fieldset.seg { border: none; padding: 0; margin: 14px 0 0; display: flex; gap: 8px; flex-wrap: wrap; }
+fieldset.seg legend { font-size: .9rem; color: var(--muted); margin-bottom: 6px; padding: 0; }
+fieldset.seg label { flex: 1; margin: 0; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
+fieldset.seg label:has(input:checked) { border-color: var(--accent); background: var(--bg); font-weight: 700; }
+fieldset.seg input { width: auto; }
 .fill-list .qty-row input[readonly] { border-color: transparent; background: transparent; font-weight: 700; }
 .qty-row .note, .fill-list .note { display: block; font-size: .8rem; color: var(--muted); }
 .big-fill { width: 100%; }
-@media (max-width: 380px) { .actions, .row { grid-template-columns: 1fr; } .dose-row { grid-template-columns: minmax(0,1fr) 72px 70px; } }
+@media (max-width: 380px) { .actions, .row { grid-template-columns: 1fr; }  }
 </style>
 </head>
 <body>
@@ -138,9 +142,10 @@ label.check input { width: 20px; height: 20px; }
   <div class="view" id="view-overview">
     <div id="banner" class="banners"></div>
     <section class="card appt">
+      <label for="apptDate" class="appt-label">Next doctor's appointment</label>
       <div class="appt-row">
-        <label for="apptDate">Next doctor's appointment</label>
         <input id="apptDate" type="date">
+        <button class="primary" id="btnApptSave">Save</button>
       </div>
       <p class="muted" id="apptHint" style="margin:6px 0 0"></p>
     </section>
@@ -158,14 +163,8 @@ label.check input { width: 20px; height: 20px; }
   <div class="view" id="view-doses" hidden>
     <section class="card">
       <div class="head"><h2>Weekly doses</h2><button class="link" id="btnAddMed">+ Add medication</button></div>
-      <p class="muted" style="margin:0 0 10px">How many pills of each you take per week. Change these after a checkup and tap Save. Set one to Paused if it may come back at a later checkup, or Stopped if it won't. Its pills stay counted.</p>
-      <div class="dose-row top"><span>Medication</span><span style="text-align:right">Per week</span><span style="text-align:right" id="perFillHead">Per fill</span></div>
+      <p class="muted" style="margin:0 0 4px">Tap ⋯ to change a dose after a checkup, or to pause or stop a medication.</p>
       <div id="doseRows"></div>
-      <div class="save-bar">
-        <span class="muted" id="doseStatus"></span>
-        <button id="btnDoseReset" hidden>Cancel</button>
-        <button class="primary" id="btnDoseSave" disabled>Save dose changes</button>
-      </div>
     </section>
     <section class="card">
       <h2>Schedule</h2>
@@ -217,6 +216,28 @@ label.check input { width: 20px; height: 20px; }
     <div class="err" id="medErr"></div>
     <div class="dialog-actions">
       <button type="button" class="link danger" id="btnDeleteMed" style="margin-right:auto">Delete</button>
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Change dose or status -->
+<dialog id="dlgDose">
+  <form method="dialog" id="formDose">
+    <h2 id="doseTitle"></h2>
+    <label for="dAmount" id="dAmountLabel">Pills per week</label>
+    <input id="dAmount" type="number" min="0.05" step="any" inputmode="decimal">
+    <fieldset class="seg">
+      <legend>Status</legend>
+      <label><input type="radio" name="dStatus" value="taking"> Taking</label>
+      <label><input type="radio" name="dStatus" value="paused"> Paused</label>
+      <label><input type="radio" name="dStatus" value="stopped"> Stopped</label>
+    </fieldset>
+    <p class="muted" style="margin:6px 0 0">Paused: may come back at a later checkup. Stopped: won't come back. Either way its pills stay counted.</p>
+    <div class="err" id="doseErr"></div>
+    <div class="dialog-actions">
+      <button type="button" class="link" id="btnDoseCounts" style="margin-right:auto">Edit pill counts</button>
       <button type="button" data-close>Cancel</button>
       <button type="submit" class="primary">Save</button>
     </div>
@@ -375,22 +396,28 @@ async function initCloud() {
     cloud = db.doc(`data/users/${me}/tracker`);
     const snap = await cloud.get();
     if (snap.exists && snap.data() && Array.isArray(snap.data().meds)) {
-      if (!dirty) { state = normalize(snap.data()); writeLocal(); draft = {}; render(); }
+      if (!dirty) { state = normalize(snap.data()); writeLocal(); render(); }
       else push();
     } else if (state.meds.length) push();
-    setSync("Saved privately to your Claude account. Only you can see it.");
+    setSync(SYNC_OK);
   } catch (e) {
     cloud = null; setSync("Couldn't reach your Claude account. Saved in this browser only.");
   }
 }
+const SYNC_OK = "Saved privately to your Claude account. Only you can see it.";
+// Resolves true once the change is stored in your account, false if it only reached this browser.
 function push() {
-  if (!cloud) return;
+  if (!cloud) return Promise.resolve(false);
   const snapshot = JSON.parse(JSON.stringify(state));
-  writing = writing.then(() => cloud.set(snapshot)).catch(e => {
-    setSync(e && e.code === "quota_exceeded" ? "Your history is too large to save. Export a backup and import a shorter one." : "Last change wasn't saved to your account. It is kept in this browser.");
+  writing = writing.then(() => cloud.set(snapshot)).then(() => { setSync(SYNC_OK); return true; }, e => {
+    setSync(e && e.code === "quota_exceeded"
+      ? "Your history is too large to save. Export a backup and import a shorter one."
+      : `Your last change didn't reach your Claude account (${(e && e.code) || "unknown error"}). It is kept in this browser for now.`);
+    return false;
   });
+  return writing;
 }
-function save() { dirty = true; writeLocal(); push(); render(); }
+function save() { dirty = true; writeLocal(); const done = push(); render(); return done; }
 
 // Record an action with a snapshot of the medications beforehand so it can be undone.
 function record(text, extra = {}) {
@@ -453,9 +480,9 @@ function render() {
   const last = state.settings.apptDate && !appt ? state.settings.apptDate : null;
   if (document.activeElement !== $("apptDate")) $("apptDate").value = appt || "";
   $("apptHint").textContent = appt
-    ? `Saved. You order at this appointment. Anything that runs out before ${fmt(addDays(appt, hw * 7))} (${hw} weeks after it) is flagged.`
+    ? `You order at this appointment. Anything that runs out before ${fmt(addDays(appt, hw * 7))} (${hw} weeks after it) is flagged.`
     : last ? `Your appointment on ${fmt(last)} has passed. Enter the next date once you have it.`
-           : `Enter the date of your next appointment. It's saved until that day has passed.`;
+           : `Pick the date of your next appointment and tap Save. It stays until that day has passed.`;
 
   let html;
   if (!state.meds.length) {
@@ -465,7 +492,7 @@ function render() {
   } else {
     const nf = nextFillDate();
     const fillLine = nf ? `<div class="sub">Next dispenser fill: ${fmt(nf)} (${rel(diffDays(nf, today))})</div>` : "";
-    const item = x => `<li>${esc(x.m.name)}: runs out ${fmt(x.p.runOut)}</li>`;
+    const item = x => `<li>${esc(x.m.name)}</li>`;
     const now = projs.filter(x => x.p.level === "now"), order = projs.filter(x => x.p.level === "order");
     const base = appt || today, horizon = addDays(base, hw * 7);
     if (appt) {
@@ -488,7 +515,7 @@ function render() {
   $("banner").innerHTML = html;
   $("btnFill").textContent = `Fill dispenser (${num(wk)} week${wk === 1 ? "" : "s"})`;
 
-  const activeHtml = `<div class="group-label first">Taking now</div>` + projs.map(({ m, p }) => `
+  const activeHtml = projs.map(({ m, p }) => `
     <div class="med">
       <div class="med-head">
         <span class="med-name">${esc(m.name)}</span>
@@ -512,11 +539,11 @@ function render() {
     </div>`).join("");
   $("meds").innerHTML = state.meds.length
     ? (projs.length ? activeHtml : "") +
-      (paused.length ? `<div class="group-label">Paused</div>` + offHtml(paused, "Paused") : "") +
-      (stopped.length ? `<div class="group-label">Stopped</div>` + offHtml(stopped, "Stopped") : "")
+      offGroup("meds", (paused.length ? `<div class="group-label">Paused</div>` + offHtml(paused, "Paused") : "") +
+        (stopped.length ? `<div class="group-label">Stopped</div>` + offHtml(stopped, "Stopped") : ""), paused.length + stopped.length)
     : `<p class="muted">No medications yet.</p>`;
 
-  if (!Object.keys(draft).length) renderDoses();
+  renderDoses();
 
   $("history").innerHTML = state.history.length ? state.history.slice(0, 60).map((h, i) => `
     <div class="history-item"><span><span class="muted">${fmt(h.date)}</span> · ${esc(h.text)}</span>
@@ -530,81 +557,72 @@ function render() {
   $("setFillWeeks").value = num(wk);
 }
 
+// Paused and stopped medications sit in a folded section, closed unless you open it.
+const openGroups = {};
+function offGroup(key, inner, n) {
+  if (!n) return "";
+  return `<details class="off-group" data-group="${key}" ${openGroups[key] ? "open" : ""}><summary>Paused and stopped (${n})</summary>${inner}</details>`;
+}
+document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.off-group")) openGroups[e.target.dataset.group] = e.target.open; }, true);
+
 async function undo() {
   const h = state.history[0];
   if (!h || !h.before || !await ask(`Undo “${h.text}”?`, "Undo")) return;
   state.meds = JSON.parse(h.before);
   state.history.shift();
-  draft = {}; save(); toast("Undone");
+  save(); toast("Undone");
 }
 
 // ---------- weekly doses tab ----------
-let draft = {};   // id -> { perWeek, active } while editing
-function perFillText(pw, active, m) {
-  if (!active) return "–";
-  if (m && isMonthly(m)) return `${num(pw)} on the ${ordinal(m.monthDay)}`;
-  const per = pw * weeks();
-  return Number.isInteger(Math.round(per * 1e6) / 1e6) ? `${num(per)}` : `avg ${num(per)}`;
+function fillText(m) {
+  if (isMonthly(m)) return dose(m);
+  const per = m.perWeek * weeks();
+  return `${num(m.perWeek)} a week · ${Number.isInteger(Math.round(per * 1e6) / 1e6) ? num(per) : "avg " + num(per)} per ${num(weeks())}-week fill`;
+}
+function doseRow(m) {
+  return `<div class="dose-row${m.active ? "" : " off"}">
+    <div class="dose-name"><b>${esc(m.name)}</b><span class="muted">${fillText(m)}</span></div>
+    <button class="kebab" data-dose="${m.id}" aria-label="Options for ${esc(m.name)}" title="Change dose or status">⋯</button>
+  </div>`;
 }
 function renderDoses() {
-  $("perFillHead").textContent = `Per ${num(weeks())}-wk fill`;
-  const list = [...byStatus("taking"), ...byStatus("paused"), ...byStatus("stopped")];
-  $("doseRows").innerHTML = list.length ? list.map(m => {
-    const d = draft[m.id] || {};
-    const pw = d.perWeek != null ? d.perWeek : amountOf(m);
-    const st = d.status || statusOf(m), on = st === "taking";
-    const changed = draft[m.id] ? " changed" : "";
-    return `<div class="dose-row${on ? "" : " off"}${changed}" data-id="${m.id}">
-      <div class="dose-name"><b>${esc(m.name)}</b>
-        ${isMonthly(m) ? `<span class="muted" style="font-size:.8rem">Monthly, on the ${ordinal(m.monthDay)}. Number is per month.</span>` : ""}
-        <select class="status" id="ds_${m.id}" aria-label="${esc(m.name)} status">${["taking", "paused", "stopped"].map(x => `<option value="${x}" ${x === st ? "selected" : ""}>${x[0].toUpperCase() + x.slice(1)}</option>`).join("")}</select></div>
-      <input type="number" id="dw_${m.id}" min="0.05" step="any" inputmode="decimal" value="${num(pw)}" aria-label="${esc(m.name)} pills ${unitOf(m)}">
-      <span class="per-fill" id="dp_${m.id}">${perFillText(pw, on, m)}</span>
-    </div>`;
-  }).join("") : `<p class="muted">No medications yet. Tap “+ Add medication”.</p>`;
-  updateDoseBar();
+  const paused = byStatus("paused"), stopped = byStatus("stopped");
+  $("doseRows").innerHTML = state.meds.length
+    ? byStatus("taking").map(doseRow).join("") +
+      offGroup("doses", (paused.length ? `<div class="group-label">Paused</div>` + paused.map(doseRow).join("") : "") +
+        (stopped.length ? `<div class="group-label">Stopped</div>` + stopped.map(doseRow).join("") : ""), paused.length + stopped.length)
+    : `<p class="muted">No medications yet. Tap “+ Add medication”.</p>`;
+  document.querySelectorAll("[data-dose]").forEach(b => b.onclick = () => openDose(b.dataset.dose));
 }
-function updateDoseBar() {
-  const n = Object.keys(draft).length;
-  $("btnDoseSave").disabled = !n;
-  $("btnDoseReset").hidden = !n;
-  $("doseStatus").textContent = n ? `${n} unsaved change${n === 1 ? "" : "s"}` : "";
+
+let doseMed = null;
+function openDose(id) {
+  doseMed = state.meds.find(m => m.id === id);
+  const m = doseMed;
+  $("doseTitle").textContent = m.name;
+  $("dAmountLabel").textContent = isMonthly(m) ? `Pills each month (on the ${ordinal(m.monthDay)})` : "Pills per week";
+  $("dAmount").value = num(amountOf(m));
+  document.querySelectorAll('input[name="dStatus"]').forEach(r => r.checked = r.value === statusOf(m));
+  $("doseErr").textContent = "";
+  $("dlgDose").showModal();
 }
-// Number boxes fire "input" as you type; the status menu fires "change".
-["input", "change"].forEach(t => $("doseRows").addEventListener(t, e => onDoseRow(e.target.closest(".dose-row"))));
-function onDoseRow(row) {
-  if (!row) return;
-  const m = state.meds.find(x => x.id === row.dataset.id);
-  const pw = +$("dw_" + m.id).value, st = $("ds_" + m.id).value, on = st === "taking";
-  if (pw === amountOf(m) && st === statusOf(m)) delete draft[m.id];
-  else draft[m.id] = { perWeek: pw, status: st };
-  row.classList.toggle("changed", !!draft[m.id]);
-  row.classList.toggle("off", !on);
-  $("dp_" + m.id).textContent = pw > 0 ? perFillText(pw, on, m) : "–";
-  updateDoseBar();
-}
-$("btnDoseReset").onclick = () => { draft = {}; renderDoses(); };
-$("btnDoseSave").onclick = () => {
-  const today = todayISO();
-  const bad = Object.entries(draft).filter(([, d]) => !(d.perWeek > 0));
-  if (bad.length) { $("doseStatus").textContent = "Pills per week must be more than 0. To stop one, set it to Paused or Stopped."; return; }
+$("btnDoseCounts").onclick = () => { $("dlgDose").close(); openMed(doseMed.id); };
+$("formDose").addEventListener("submit", e => {
+  e.preventDefault();
+  const m = doseMed, today = todayISO();
+  const amt = +$("dAmount").value, st = document.querySelector('input[name="dStatus"]:checked').value, was = statusOf(m);
+  if (!(amt > 0)) { $("doseErr").textContent = "Enter a number of pills more than 0. To stop taking it, choose Paused or Stopped."; return; }
+  if (amt === amountOf(m) && st === was) { $("dlgDose").close(); return; }
   const notes = [];
-  const changes = Object.entries(draft).map(([id, d]) => [state.meds.find(m => m.id === id), d]);
-  changes.forEach(([m, d]) => {
-    const was = statusOf(m), now = d.status;
-    if (was !== now && now !== "taking") notes.push(`${now} ${m.name}`);
-    else if (was !== now) notes.push(`resumed ${m.name} at ${num(d.perWeek)} ${unitOf(m)}`);
-    else notes.push(`${m.name} ${num(amountOf(m))} → ${num(d.perWeek)} ${unitOf(m)}`);
-  });
-  record(`Dose change: ${notes.join("; ")}`, { kind: "dose" });
-  changes.forEach(([m, d]) => {
-    settle(m, today);
-    if (m.active && d.status !== "taking") { m.stock += m.disp; m.disp = 0; }   // pills come out of the dispenser
-    m.active = d.status === "taking"; m.stopped = d.status === "stopped"; m.carry = 0;
-    if (isMonthly(m)) m.perMonth = d.perWeek; else m.perWeek = d.perWeek;
-  });
-  draft = {}; save(); toast("Doses saved");
-};
+  if (amt !== amountOf(m)) notes.push(`dose ${num(amountOf(m))} → ${num(amt)} ${unitOf(m)}`);
+  if (st !== was) notes.push(st === "taking" ? "taking again" : st);
+  record(`${m.name}: ${notes.join(", ")}`, { kind: "dose" });
+  settle(m, today);
+  if (m.active && st !== "taking") { m.stock += m.disp; m.disp = 0; }   // pills come out of the dispenser
+  m.active = st === "taking"; m.stopped = st === "stopped"; m.carry = 0;
+  if (isMonthly(m)) m.perMonth = amt; else m.perWeek = amt;
+  $("dlgDose").close(); save(); toast(`Saved ${m.name}`);
+});
 
 // ---------- medication dialog (counts) ----------
 let editing = null;
@@ -637,7 +655,7 @@ $("btnDeleteMed").onclick = async () => {
   if (!await ask(`Delete ${m.name}? If it might come back after a checkup, untick Taking on the Weekly doses tab instead. You can undo this from History.`, "Delete")) return;
   record(`Deleted ${m.name}`);
   state.meds = state.meds.filter(x => x.id !== m.id);
-  delete draft[m.id]; save(); toast(`Deleted ${m.name}`);
+  save(); toast(`Deleted ${m.name}`);
 };
 $("formMed").addEventListener("submit", e => {
   e.preventDefault();
@@ -727,20 +745,24 @@ $("formFill").addEventListener("submit", e => {
 });
 
 // ---------- appointment ----------
-function saveAppt() {
-  const v = $("apptDate").value;
-  if (v && diffDays(v, todayISO()) < 0) { toast("That date has already passed. Enter your next appointment."); $("apptDate").value = upcomingAppt(todayISO()) || ""; return; }
-  if (v === (upcomingAppt(todayISO()) || "")) return;
-  state.settings.apptDate = v;
-  if (v) record(`Next appointment set to ${fmt(v)}`, { kind: "note" });
-  save(); toast(v ? `Appointment saved: ${fmt(v)}` : "Appointment cleared");
+async function saveAppt() {
+  const v = $("apptDate").value, today = todayISO();
+  if (!v) { toast("Pick the appointment date first, then tap Save."); return; }
+  if (diffDays(v, today) < 0) { toast("That date has already passed. Enter your next appointment."); return; }
+  if (v !== upcomingAppt(today)) {
+    state.settings.apptDate = v;
+    record(`Next appointment set to ${fmt(v)}`, { kind: "note" });
+  }
+  $("btnApptSave").disabled = true;
+  const ok = await save();
+  $("btnApptSave").disabled = false;
+  toast(ok ? `Appointment saved: ${fmt(v)}` : cloud ? "Couldn't save to your Claude account. Check your connection and tap Save again." : `Appointment saved in this browser: ${fmt(v)}`);
 }
-$("apptDate").addEventListener("change", saveAppt);
-$("apptDate").addEventListener("blur", saveAppt);
+$("btnApptSave").onclick = saveAppt;
 
 // ---------- settings & backup ----------
 function setting(id, key, min, scale = 1) {
-  $(id).onchange = () => { const v = Math.round(+$(id).value); if (v >= min) { state.settings[key] = v * scale; draft = {}; save(); } else render(); };
+  $(id).onchange = () => { const v = Math.round(+$(id).value); if (v >= min) { state.settings[key] = v * scale; save(); } else render(); };
 }
 setting("setHorizon", "horizonWeeks", 1);
 setting("setFillWeeks", "fillDays", 1, 7);
@@ -764,7 +786,7 @@ $("fileImport").onchange = async () => {
   try { s = JSON.parse(await f.text()); if (!Array.isArray(s.meds)) throw 0; }
   catch (e) { toast("That file isn't a Pill Tracker backup."); return; }
   if (!await ask("Replace everything here with this backup?", "Replace")) return;
-  state = normalize(s); draft = {}; save(); toast("Backup imported");
+  state = normalize(s); save(); toast("Backup imported");
 };
 
 showTab();
