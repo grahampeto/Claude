@@ -80,13 +80,30 @@ function googleToken(env) {
   return pendingToken;
 }
 
+function parseServiceAccount(env) {
+  let sa;
+  try { sa = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT); } catch (e) {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT isn\u2019t valid JSON – paste the whole downloaded .json file, from { to }');
+  }
+  if (!sa.private_key || !sa.client_email) throw new Error('GOOGLE_SERVICE_ACCOUNT is missing private_key or client_email – is it the service-account key file?');
+  return sa;
+}
+
 async function fetchToken(env) {
-  const sa = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT);
-  const pem = sa.private_key.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
-  const der = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const sa = parseServiceAccount(env);
+  // Tolerate keys whose line breaks were pasted as literal "\n".
+  const pem = sa.private_key.replace(/\\n/g, '\n').replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+  let key;
+  try {
+    const der = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
+    key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  } catch (e) {
+    throw new Error('The private_key in GOOGLE_SERVICE_ACCOUNT is damaged – paste the whole .json file again without editing it');
+  }
   const now = Math.floor(Date.now() / 1000);
-  const unsigned = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + b64url(JSON.stringify({
+  const header = { alg: 'RS256', typ: 'JWT' };
+  if (sa.private_key_id) header.kid = sa.private_key_id;
+  const unsigned = b64url(JSON.stringify(header)) + '.' + b64url(JSON.stringify({
     iss: sa.client_email,
     scope: 'https://www.googleapis.com/auth/calendar',
     aud: 'https://oauth2.googleapis.com/token',
@@ -101,9 +118,40 @@ async function fetchToken(env) {
       '&assertion=' + unsigned + '.' + b64url(sig),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error('Google sign-in failed: ' + (data.error_description || data.error || res.status));
+  if (!res.ok) {
+    const msg = data.error_description || data.error || String(res.status);
+    if (/signature/i.test(msg)) throw new Error('Google sign-in failed: ' + (await diagnoseKey(sa, unsigned, sig)));
+    throw new Error('Google sign-in failed: ' + msg);
+  }
   tokenCache = { token: data.access_token, exp: Date.now() + data.expires_in * 1000 };
   return tokenCache.token;
+}
+
+// Google publishes each service account's public keys. Use them to explain
+// an "Invalid JWT Signature" in plain words.
+async function diagnoseKey(sa, unsigned, sig) {
+  const id = sa.private_key_id || '';
+  const short = id ? ' (key ' + id.slice(0, 8) + '…)' : '';
+  try {
+    const res = await fetch('https://www.googleapis.com/service_accounts/v1/jwk/' + encodeURIComponent(sa.client_email));
+    if (!res.ok) return 'Google doesn\u2019t know the service account ' + sa.client_email + ' – was it deleted?';
+    const jwks = (await res.json()).keys || [];
+    const jwk = jwks.find((k) => k.kid === id);
+    if (!jwk) {
+      return 'Google doesn\u2019t have this key' + short + '. It was deleted, or it was created in the last few minutes ' +
+        '(wait 5 minutes and try again). Otherwise create a new JSON key and paste the whole file into GOOGLE_SERVICE_ACCOUNT.';
+    }
+    const pub = await crypto.subtle.importKey('jwk', { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', pub, sig, new TextEncoder().encode(unsigned));
+    if (!ok) {
+      return 'the private key in GOOGLE_SERVICE_ACCOUNT doesn\u2019t match key' + short +
+        '. The pasted text was probably changed or mixed with another file – paste the whole .json file again.';
+    }
+    return 'the key' + short + ' checks out, but Google still refused it. New keys can take a few minutes to start working – try again shortly.';
+  } catch (e) {
+    return 'Invalid JWT Signature – usually a deleted or brand-new key (wait 5 minutes), or a damaged paste of the .json file.';
+  }
 }
 
 async function gcal(env, path, init = {}) {

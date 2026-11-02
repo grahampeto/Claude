@@ -1221,8 +1221,14 @@
       else if (G.status === 'error') { gs.className = 'small sync bad'; gs.textContent = '● ' + G.errors.join('; '); }
       else if (G.status === 'ok') {
         gs.className = 'small sync ' + (G.errors.length ? 'bad' : 'ok');
-        gs.textContent = (G.calendars.length ? '● Connected: ' + G.calendars.map(function (c) { return c.name; }).join(', ') + ' (' + G.events.length + ' events)' : '● Worker reachable, but no calendars – check GOOGLE_CALENDAR_IDS') +
-          (G.errors.length ? ' · Problems: ' + G.errors.join('; ') : '');
+        if (G.calendars.length) {
+          gs.textContent = '● Connected: ' + G.calendars.map(function (c) { return c.name; }).join(', ') + ' (' + G.events.length + ' events)' +
+            (G.errors.length ? ' · Problems: ' + G.errors.join('; ') : '');
+        } else if (G.errors.length) {
+          gs.textContent = '● Worker connected, but Google said no. ' + G.errors.join('; ');
+        } else {
+          gs.textContent = '● Worker connected, but no calendars – set GOOGLE_CALENDAR_IDS on the worker';
+        }
       } else { gs.className = 'small muted'; gs.textContent = 'Checking…'; }
       $('set-cams').innerHTML = s.cameras.length ? '<div class="list">' + s.cameras.map(function (c, i) {
         var detail = c.type === 'go2rtc' ? c.server + ' → ' + c.stream : c.type === 'tuya' || c.type === 'ring' ? 'device ' + c.deviceId : c.url;
