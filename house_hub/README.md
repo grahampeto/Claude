@@ -148,9 +148,9 @@ It can't run on the wall iPad: iOS doesn't let apps run background servers. Pick
   ```
 - **Home Assistant:** go to Settings → Add-ons → Add-on store → ⋮ → Repositories, add
   `https://github.com/AlexxIT/hassio-addons`, then install **go2rtc** and start it.
-- **An old Android phone, left plugged in:** install **Termux** from F-Droid, then run
-  `pkg install go2rtc` (or download the `linux_arm64` build from the releases page) and start
-  `go2rtc`. Turn on Termux's wake lock and switch off battery optimisation for Termux so
+- **An old Android phone, left plugged in:** install **Termux** from F-Droid, download the
+  `go2rtc_linux_arm64` build from the releases page into Termux, make it executable
+  (`chmod +x`) and run it. Turn on Termux's wake lock and switch off battery optimisation for Termux so
   Android doesn't stop it.
 - **Windows / Mac:** download go2rtc for your system from
   <https://github.com/AlexxIT/go2rtc/releases> and run it. It creates `go2rtc.yaml` next to itself.
