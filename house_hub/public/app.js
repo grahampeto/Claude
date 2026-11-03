@@ -405,13 +405,14 @@
     pull: function (cb) {
       var self = this, loc = Store.data.settings.weather;
       var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + loc.lat + '&longitude=' + loc.lon +
-        '&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m' +
-        '&hourly=precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
-        '&timezone=auto&forecast_days=3';
+        '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation' +
+        '&hourly=temperature_2m,precipitation_probability,weather_code,is_day' +
+        '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,sunrise,sunset,uv_index_max,wind_speed_10m_max' +
+        '&timezone=auto&forecast_days=14';
       ajax('GET', url, null, function (err, res) {
         if (err || !res || !res.current) { self.error = 'Weather unavailable'; }
         else { self.data = res; self.data.at = Date.now(); self.error = ''; lsSet('househub.weather', res); }
-        if (cb) cb(err); else if (!current) renderHome();
+        if (cb) cb(err); else if (!current) renderHome(); else if (current === 'weather') Apps.weather.render();
       });
     },
     // "Rain likely from 15:00" if the next 8 hours have a ≥60% chance.
@@ -427,23 +428,17 @@
       }
       return '';
     },
+    // The compact widget at the top of the home screen (tap for the forecast).
     html: function () {
       var d = this.data;
       if (!d) return '<div class="w-empty muted small">' + (this.error || 'Loading weather…') + '</div>';
       var c = d.current, now = wmo(c.weather_code, c.is_day), dl = d.daily;
-      var h = '<div class="w-now flex center"><span class="w-icon">' + now.icon + '</span>' +
+      var rain = this.rainSoon();
+      return '<div class="w-now flex center"><span class="w-icon">' + now.icon + '</span>' +
         '<span class="w-temp">' + Math.round(c.temperature_2m) + '°</span>' +
         '<div class="w-desc"><div>' + now.text + '</div>' +
-        '<div class="muted">H ' + Math.round(dl.temperature_2m_max[0]) + '° · L ' + Math.round(dl.temperature_2m_min[0]) + '° · 💧' + (dl.precipitation_probability_max[0] || 0) + '%</div></div></div>';
-      var rain = this.rainSoon();
-      h += '<div class="w-sub">' + (rain ? '<span class="w-rain">☔ ' + rain + '</span> · ' : '') +
-        'Feels ' + Math.round(c.apparent_temperature) + '° · ' + esc(Store.data.settings.weather.name) + '</div>';
-      h += '<div class="w-days flex">';
-      for (var i = 1; i < Math.min(3, dl.time.length); i++) {
-        var w = wmo(dl.weather_code[i], 1), day = parseDay(dl.time[i]);
-        h += '<span class="w-day">' + (i === 1 ? 'Tomorrow' : DAYS[day.getDay()].slice(0, 3)) + ' ' + w.icon + ' ' + Math.round(dl.temperature_2m_max[i]) + '°/' + Math.round(dl.temperature_2m_min[i]) + '°</span>';
-      }
-      return h + '</div>';
+        '<div class="muted">H ' + Math.round(dl.temperature_2m_max[0]) + '° · L ' + Math.round(dl.temperature_2m_min[0]) + '° · 💧' + (dl.precipitation_probability_max[0] || 0) + '%</div></div></div>' +
+        (rain ? '<div class="w-sub"><span class="w-rain">☔ ' + rain + '</span></div>' : '');
     }
   };
 
@@ -954,6 +949,7 @@
         return '<div class="row flex center' + (t.done ? ' done' : '') + '" data-action="todo-toggle" data-id="' + t.id + '">' +
           '<div class="check">' + (t.done ? '✓' : '') + '</div><div class="grow text"><div>' + esc(t.text) + '</div>' +
           '<div class="meta">' + whoTag(t.who) + (t.due ? '<span class="' + (late ? 'overdue' : '') + '">' + (late ? 'Overdue · ' : 'Due ') + fmtDayShort(t.due) + '</span>' : '') + '</div></div>' +
+          (t.done ? '' : '<button class="btn small home-toggle' + (t.home === false ? '' : ' on') + '" data-action="todo-home" data-id="' + t.id + '" title="Show on the home screen">' + (t.home === false ? '📋 List only' : '🏠 Home') + '</button>') +
           '<button class="btn small" data-action="todo-edit" data-id="' + t.id + '">Edit</button>' +
           '<button class="del" data-action="todo-del" data-id="' + t.id + '">✕</button></div>';
       }
@@ -966,11 +962,12 @@
       Modal.open(isNew ? 'New task' : 'Edit task',
         '<input class="field" name="text" placeholder="Task" value="' + esc(t.text || '') + '">' +
         '<label class="lbl">Who</label>' + segHtml('who', WHO_OPTS, t.who || 'both') +
-        '<label class="lbl">Due date (optional)</label><input class="field" type="date" name="due" value="' + esc(t.due || '') + '">',
+        '<label class="lbl">Due date (optional)</label><input class="field" type="date" name="due" value="' + esc(t.due || '') + '">' +
+        '<label class="lbl">Show it</label>' + segHtml('home', [['yes', '🏠 On the home screen'], ['no', '📋 Only in the list']], t.home === false ? 'no' : 'yes'),
         function () {
           var text = Modal.val('text');
           if (!text) return false;
-          t.text = text; t.who = Modal.seg('who'); t.due = Modal.val('due');
+          t.text = text; t.who = Modal.seg('who'); t.due = Modal.val('due'); t.home = Modal.seg('home') !== 'no';
           if (isNew) { t.id = uid(); t.created = Date.now(); t.done = false; Store.data.todos.push(t); }
           Store.save('todos');
         });
@@ -983,6 +980,13 @@
         el.value = ''; el.blur();
         var f = Apps.todo.filter;
         Apps.todo.editor({ text: text, who: f === 'all' ? 'both' : f });
+      },
+      'todo-home': function (el) {
+        var t = Apps.todo.find(el.getAttribute('data-id'));
+        if (!t) return;
+        t.home = t.home === false;
+        Store.save('todos');
+        Toast.show(t.home ? 'Shown on the home screen' : 'Now only in the list');
       },
       'todo-edit': function (el) { var t = Apps.todo.find(el.getAttribute('data-id')); if (t) Apps.todo.editor(t); },
       'todo-toggle': function (el) {
@@ -1002,6 +1006,74 @@
       }
     }
   };
+
+  // ---- Weather forecast -----------------------------------------------------
+  function compass(deg) { return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((deg || 0) % 360) / 45) % 8]; }
+  Apps.weather = {
+    title: 'Weather',
+    headerActions: '<button class="btn small" data-action="weather-refresh">↻</button>',
+    enter: function () { if (!Weather.data || Date.now() - (Weather.data.at || 0) > 10 * 60000) Weather.pull(); },
+    shell: function () { return '<div id="wx"></div>'; },
+    render: function () {
+      var d = Weather.data, box = $('wx');
+      if (!box) return;
+      if (!d) { box.innerHTML = '<div class="list"><div class="list-empty">' + (Weather.error || 'Loading…') + '</div></div>'; return; }
+      var c = d.current, now = wmo(c.weather_code, c.is_day), dl = d.daily, loc = Store.data.settings.weather.name;
+      var sunrise = parseISO(dl.sunrise[0]), sunset = parseISO(dl.sunset[0]);
+      // Current conditions
+      var h = '<div class="wx-now">' +
+        '<div class="wx-place muted">' + esc(loc) + '</div>' +
+        '<div class="flex center" style="-webkit-box-pack:center;-webkit-justify-content:center;justify-content:center">' +
+        '<span class="wx-icon">' + now.icon + '</span><span class="wx-temp">' + Math.round(c.temperature_2m) + '°</span></div>' +
+        '<div class="wx-cond">' + now.text + '</div>' +
+        '<div class="muted">H ' + Math.round(dl.temperature_2m_max[0]) + '° · L ' + Math.round(dl.temperature_2m_min[0]) + '° · Feels like ' + Math.round(c.apparent_temperature) + '°</div>' +
+        (this.rain() ? '<div class="w-rain" style="margin-top:6px">☔ ' + this.rain() + '</div>' : '') +
+        '</div>';
+      // Details grid
+      var tiles = [
+        ['💨', 'Wind', Math.round(c.wind_speed_10m) + ' km/h ' + compass(c.wind_direction_10m), 'Gusts ' + Math.round(c.wind_gusts_10m) + ' km/h'],
+        ['💧', 'Humidity', Math.round(c.relative_humidity_2m) + '%', ''],
+        ['🌂', 'Rain today', (dl.precipitation_sum[0] || 0).toFixed(1) + ' mm', (dl.precipitation_probability_max[0] || 0) + '% chance'],
+        ['☀️', 'UV index', Math.round(dl.uv_index_max[0] || 0), uvLabel(dl.uv_index_max[0])],
+        ['🌅', 'Sunrise', fmtTime(sunrise), ''],
+        ['🌇', 'Sunset', fmtTime(sunset), '']
+      ];
+      h += '<div class="wx-tiles flex wrap">' + tiles.map(function (t) {
+        return '<div class="wx-tile"><div class="muted small">' + t[0] + ' ' + t[1] + '</div><div class="wx-val">' + t[2] + '</div>' + (t[3] ? '<div class="muted small">' + t[3] + '</div>' : '') + '</div>';
+      }).join('') + '</div>';
+      // Next 24 hours
+      var hr = d.hourly, start = 0, nowT = new Date();
+      for (var i = 0; i < hr.time.length; i++) { if (parseISO(hr.time[i]) > new Date(nowT.getTime() - 3600000)) { start = i; break; } }
+      h += '<div class="section-label">Next 24 hours</div><div class="wx-hours">';
+      for (var j = start; j < Math.min(start + 24, hr.time.length); j++) {
+        var at = parseISO(hr.time[j]), w = wmo(hr.weather_code[j], hr.is_day[j]);
+        h += '<div class="wx-hour"><div class="muted small">' + (j === start ? 'Now' : pad(at.getHours())) + '</div><div class="wx-hicon">' + w.icon + '</div>' +
+          '<div class="wx-htemp">' + Math.round(hr.temperature_2m[j]) + '°</div><div class="wx-hrain">' + (hr.precipitation_probability[j] >= 10 ? hr.precipitation_probability[j] + '%' : '&nbsp;') + '</div></div>';
+      }
+      h += '</div>';
+      // 14 days, with a bar showing each day's range against the fortnight's lows/highs
+      var lo = Math.min.apply(null, dl.temperature_2m_min), hi = Math.max.apply(null, dl.temperature_2m_max), span = Math.max(1, hi - lo);
+      h += '<div class="section-label">14-day forecast</div><div class="list">';
+      for (var k = 0; k < dl.time.length; k++) {
+        var day = parseDay(dl.time[k]), dw = wmo(dl.weather_code[k], 1), mn = dl.temperature_2m_min[k], mx = dl.temperature_2m_max[k];
+        var label = k === 0 ? 'Today' : k === 1 ? 'Tomorrow' : DAYS[day.getDay()].slice(0, 3) + ' ' + day.getDate() + ' ' + MONTHS[day.getMonth()].slice(0, 3);
+        h += '<div class="row flex center wx-day">' +
+          '<div class="wx-dname">' + label + '</div>' +
+          '<div class="wx-dicon" title="' + dw.text + '">' + dw.icon + '</div>' +
+          '<div class="wx-drain">' + ((dl.precipitation_probability_max[k] || 0) >= 10 ? '💧' + dl.precipitation_probability_max[k] + '%' : '') + '</div>' +
+          '<div class="wx-dmin muted">' + Math.round(mn) + '°</div>' +
+          '<div class="wx-range grow"><div style="margin-left:' + Math.round(100 * (mn - lo) / span) + '%;width:' + Math.max(4, Math.round(100 * (mx - mn) / span)) + '%"></div></div>' +
+          '<div class="wx-dmax">' + Math.round(mx) + '°</div></div>';
+      }
+      h += '</div><p class="muted small">Forecast by Open-Meteo · updated ' + fmtTime(new Date(d.at || Date.now())) + '. Change the town in ⚙️ Settings.</p>';
+      box.innerHTML = h;
+    },
+    rain: function () { return Weather.rainSoon(); },
+    actions: {
+      'weather-refresh': function () { Weather.pull(); Toast.show('Updating the forecast…'); }
+    }
+  };
+  function uvLabel(uv) { uv = uv || 0; return uv < 3 ? 'Low' : uv < 6 ? 'Moderate' : uv < 8 ? 'High' : uv < 11 ? 'Very high' : 'Extreme'; }
 
   // ---- Cameras ---------------------------------------------------------------
   // Modern browsers (phones, newer iPads) can run go2rtc's own player, which
@@ -1156,105 +1228,8 @@
   };
 
   // ---- Daily checklists ---------------------------------------------------
+  // The three people shown on the home screen.
   var LISTS = [['jess', 'Jess'], ['graham', 'Graham'], ['both', 'Together']];
-  function checklist(who) {
-    var c = Store.data.checklists[who];
-    if (!c) c = Store.data.checklists[who] = { items: [], done: {} };
-    // Migrate plain-string items from older data.
-    c.items = c.items.map(function (it, i) { return typeof it === 'string' ? { id: 'm' + i, text: it } : it; });
-    if (!c.done) c.done = {};
-    return c;
-  }
-  function checklistProgress(who, day) {
-    var c = checklist(who), d = c.done[day || dayKey()] || {};
-    var n = 0;
-    c.items.forEach(function (it) { if (d[it.id]) n++; });
-    return { done: n, total: c.items.length };
-  }
-  Apps.checklists = {
-    title: 'Daily Checklist',
-    who: 'jess',
-    editing: false,
-    headerActions: '<button class="btn small" data-action="chk-edit" id="chk-edit-btn">Edit list</button>',
-    shell: function () {
-      return '<div class="tabs flex" id="chk-tabs"></div>' +
-        '<form class="add-row flex hidden" data-form="chk-add" id="chk-form"><input class="field grow" id="chk-input" placeholder="New daily item…" autocomplete="off">' +
-        '<button class="btn primary" type="submit">Add</button></form><div id="chk-body"></div>';
-    },
-    render: function () {
-      var self = this, today = dayKey();
-      $('chk-tabs').innerHTML = LISTS.map(function (l) {
-        var p = checklistProgress(l[0]);
-        return '<button class="tab grow' + (l[0] === self.who ? ' active' : '') + '" data-action="chk-who" data-who="' + l[0] + '">' +
-          l[1] + ' <span class="small">' + p.done + '/' + p.total + '</span></button>';
-      }).join('');
-      var btn = $('chk-edit-btn');
-      if (btn) btn.textContent = this.editing ? 'Done' : 'Edit list';
-
-      var c = checklist(this.who), doneToday = c.done[today] || {}, p = checklistProgress(this.who);
-      var h = '';
-      if (!this.editing) {
-        h += '<div class="big-progress">' + p.done + ' of ' + p.total + ' done today</div>';
-        h += '<div class="bar" style="margin-bottom:14px"><div style="width:' + (p.total ? Math.round(100 * p.done / p.total) : 0) + '%"></div></div>';
-        h += '<div class="week-dots flex">';
-        for (var i = 6; i >= 0; i--) {
-          var d = addDays(new Date(), -i), q = checklistProgress(this.who, dayKey(d));
-          var cls = q.total && q.done === q.total ? 'full' : q.done ? 'part' : '';
-          h += '<div class="wd">' + DAYS[d.getDay()].slice(0, 3) + '<div class="d ' + cls + '">' + (cls === 'full' ? '✓' : d.getDate()) + '</div></div>';
-        }
-        h += '</div>';
-      }
-      $('chk-form').className = 'add-row flex' + (this.editing ? '' : ' hidden');
-      h += '<div class="list">';
-      if (!c.items.length) h += '<div class="list-empty">No items yet – tap “Edit list” to add some.</div>';
-      c.items.forEach(function (it, idx) {
-        if (self.editing) {
-          h += '<div class="row flex center"><div class="text grow">' + esc(it.text) + '</div>' +
-            '<button class="btn small" data-action="chk-move" data-i="' + idx + '" data-dir="-1">▲</button> ' +
-            '<button class="btn small" data-action="chk-move" data-i="' + idx + '" data-dir="1" style="margin-left:6px">▼</button>' +
-            '<button class="del" data-action="chk-del" data-id="' + it.id + '">✕</button></div>';
-        } else {
-          var on = !!doneToday[it.id];
-          h += '<div class="row flex center' + (on ? ' done' : '') + '" data-action="chk-toggle" data-id="' + it.id + '">' +
-            '<div class="check">' + (on ? '✓' : '') + '</div><div class="text grow">' + esc(it.text) + '</div></div>';
-        }
-      });
-      h += '</div>';
-      if (!this.editing && p.total && p.done === p.total) h += '<div class="celebrate">🎉 All done for today – nice work!</div>';
-      $('chk-body').innerHTML = h;
-    },
-    actions: {
-      'chk-who': function (el) { Apps.checklists.who = el.getAttribute('data-who'); },
-      'chk-edit': function () { Apps.checklists.editing = !Apps.checklists.editing; },
-      'chk-toggle': function (el) {
-        var c = checklist(Apps.checklists.who), today = dayKey(), id = el.getAttribute('data-id');
-        if (!c.done[today]) c.done[today] = {};
-        if (c.done[today][id]) delete c.done[today][id]; else c.done[today][id] = true;
-        // Keep 30 days of history.
-        var cutoff = dayKey(addDays(new Date(), -30));
-        Object.keys(c.done).forEach(function (k) { if (k < cutoff) delete c.done[k]; });
-        Store.save('checklists');
-      },
-      'chk-add': function () {
-        var el = $('chk-input'), text = el.value.trim();
-        if (!text) return;
-        checklist(Apps.checklists.who).items.push({ id: uid(), text: text });
-        el.value = '';
-        Store.save('checklists');
-      },
-      'chk-del': function (el) {
-        var c = checklist(Apps.checklists.who), id = el.getAttribute('data-id');
-        c.items = c.items.filter(function (it) { return it.id !== id; });
-        Store.save('checklists');
-      },
-      'chk-move': function (el) {
-        var c = checklist(Apps.checklists.who), i = +el.getAttribute('data-i'), j = i + (+el.getAttribute('data-dir'));
-        if (j < 0 || j >= c.items.length) return;
-        var t = c.items[i]; c.items[i] = c.items[j]; c.items[j] = t;
-        Store.save('checklists');
-      }
-    }
-  };
 
   // ---- Settings ---------------------------------------------------------------
   function randomKey() {
@@ -1627,22 +1602,21 @@
 
     $('weather').innerHTML = Weather.html();
 
-    // One card per person: checklist progress, then their open to-dos.
-    var todayK = dayKey(), MAX = 3;
+    // One card per person with their open to-dos (those marked for the home screen).
+    var todayK = dayKey(), MAX = 4;
     $('progress').innerHTML = LISTS.map(function (l) {
-      var p = checklistProgress(l[0]);
-      var pct = p.total ? Math.round(100 * p.done / p.total) : 0;
-      var todos = Store.data.todos.filter(function (t) { return !t.done && t.who === l[0]; }).sort(function (a, b) {
+      var all = Store.data.todos.filter(function (t) { return !t.done && t.who === l[0]; });
+      var todos = all.filter(function (t) { return t.home !== false; }).sort(function (a, b) {
         var da = a.due || '9999', db = b.due || '9999';
         return da < db ? -1 : da > db ? 1 : (a.created || 0) - (b.created || 0);
       });
+      var hidden = all.length - todos.length;
       var h = '<div class="person grow">' +
-        '<div class="person-head" data-action="open" data-app="checklists" data-who="' + l[0] + '">' +
-        '<div class="flex between center"><span class="name">' + l[1] + '</span>' +
-        '<span class="muted small">Checklist ' + p.done + '/' + p.total + (p.total && p.done === p.total ? ' 🎉' : '') + '</span></div>' +
-        '<div class="bar"><div style="width:' + pct + '%"></div></div></div>' +
+        '<div class="person-head flex between center" data-action="open" data-app="todo" data-who="' + l[0] + '">' +
+        '<span class="name">' + l[1] + '</span>' +
+        '<span class="muted small">' + (all.length ? all.length + ' to-do' + (all.length > 1 ? 's' : '') : '') + ' ›</span></div>' +
         '<div class="person-todos">';
-      if (!todos.length) h += '<div class="pt-empty muted small">No to-dos 🎉</div>';
+      if (!todos.length) h += '<div class="pt-empty muted small">' + (hidden ? 'Nothing for the home screen' : 'No to-dos 🎉') + '</div>';
       todos.slice(0, MAX).forEach(function (t) {
         var late = t.due && t.due < todayK;
         h += '<div class="pt flex center">' +
@@ -1669,9 +1643,6 @@
     setBadge('calendar', eventsOn(allEvents(), new Date()).length);
     setBadge('groceries', groc().items.filter(function (i) { return !i.done; }).length);
     setBadge('todo', Store.data.todos.filter(function (t) { return !t.done && t.due && t.due <= today; }).length);
-    var left = 0;
-    LISTS.forEach(function (l) { var p = checklistProgress(l[0]); left += p.total - p.done; });
-    setBadge('checklists', left);
   }
   function setBadge(app, n) {
     var b = $('badge-' + app);
@@ -1694,7 +1665,6 @@
     if (!app) return;
     if (current && Apps[current].leave) Apps[current].leave();
     current = name;
-    if (opts && opts.who && name === 'checklists') { app.who = opts.who; app.editing = false; }
     if (opts && opts.who && name === 'todo') app.filter = opts.who;
     if (app.enter) app.enter();
     $('panel-title').textContent = app.title;

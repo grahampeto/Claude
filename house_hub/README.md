@@ -4,18 +4,17 @@ A home dashboard web app for the iPad on the wall and for your phones (Android o
 iPhone). There's no server to run: the app is a static website hosted free on
 GitHub Pages, and your lists sync between devices through a free Firebase database.
 
-The home screen has a clock, today's checklist progress and notifications at the top,
+The home screen has the clock, live weather and everyone's to-dos at the top, notifications below,
 and big buttons along the bottom for the sub-apps:
 
 | App | What it does |
 |---|---|
 | 📅 **Calendar** | Month view plus a day list. **Two-way Google Calendar sync**: Google events show here, and events added here go into Google. Events are tagged Jess / Graham / Both. |
 | 🛒 **Groceries** | Shared shopping list. Adding something that's already there bumps it to ×2, ×3… (or use − / +). Tick an item and it's removed (with Undo). Items you buy often appear under *Buy again*. **Meals**: save a meal with its ingredients, then tap **+ Add to list** to put them all on the list. |
-| ✅ **To-Do** | Tasks with an owner (Jess / Graham / Together) and an optional due date. |
+| ✅ **To-Do** | Tasks with an owner (Jess / Graham / Together), an optional due date, and a switch for whether they show on the home screen or only in the list. |
 | 📹 **Cameras** | Live LSC garage camera and Ring doorbell snapshots, both through the cloud, so nothing extra runs at home. Doorbell presses show on the home screen. |
-| 📋 **Daily Checklist** | Separate lists for Jess, Graham and Together. They reset every day and show the last 7 days. Tap **Edit list** to change the items. |
 
-**Home screen:** the clock is at the top left, and the **live weather** (Open-Meteo, free, no account; set the town in ⚙️ Settings) is in the middle. Below that is a card for **Jess, Graham and Together**. Each card shows that person's checklist progress and their open **to-dos**, which you can tick off or add right there.
+**Home screen:** the clock is at the top left. The **live weather** is in the middle; tap it for a **14-day forecast** with wind, humidity, rain, UV, sunrise/sunset and the next 24 hours (Open-Meteo, free, no account; set the town in ⚙️ Settings). Below that is a card each for **Jess, Graham and Together** with their open **to-dos**, which you can tick off or add right there. To-dos marked *Only in the list* stay off the cards.
 
 **Notifications** are kept for things that pop up: doorbell rings, today's and tomorrow's calendar events, bin days, notes you leave each other (**+ Leave a note**), and a low doorbell battery.
 
