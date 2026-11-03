@@ -16,6 +16,10 @@
 //     Latest snapshot + recent dings/motion, via Ring's unofficial API
 //     (the same one Home Assistant uses). Ring can change it at any time.
 //
+//  5. Bin collection:        /afval?postcode=1234AB&number=12
+//     Your Mijn Afvalwijzer schedule (unofficial, as used by Home Assistant's
+//     afvalwijzer integration). Needs no setup.
+//
 // Secrets / variables (Worker → Settings → Variables and Secrets):
 //   HUB_TOKEN                  any long random string; also typed into House Hub Settings
 //   GOOGLE_SERVICE_ACCOUNT     the whole service-account JSON key file (Secret)
@@ -394,6 +398,50 @@ async function ringSnapshot(env, id) {
   return new Response(res.body, { headers: { ...CORS, 'Content-Type': res.headers.get('Content-Type') || 'image/jpeg', 'Cache-Control': 'no-store' } });
 }
 
+// ---------------------------------------------------------------- Bin collection (Mijn Afvalwijzer)
+// The public app key the Mijn Afvalwijzer website/app uses (also shipped in
+// Home Assistant's afvalwijzer integration). Override with AFVALWIJZER_APIKEY.
+const AFVAL_KEY = '5ef443e778f41c4f75c69459eea6e6ae0c2d92de729aa0fc61653815fbd6a8ca';
+const AFVAL_PROVIDERS = ['mijnafvalwijzer.nl', 'afvalstoffendienstkalender.nl'];
+
+async function afval(env, url) {
+  const postcode = (url.searchParams.get('postcode') || '').replace(/\s+/g, '').toUpperCase();
+  const number = (url.searchParams.get('number') || '').trim();
+  const suffix = (url.searchParams.get('suffix') || '').trim();
+  const provider = url.searchParams.get('provider') || AFVAL_PROVIDERS[0];
+  if (!/^\d{4}[A-Z]{2}$/.test(postcode)) return json({ error: 'Postcode should look like 1234AB' }, 400);
+  if (!/^\d{1,5}$/.test(number)) return json({ error: 'House number should be a number' }, 400);
+  if (!/^[A-Za-z0-9-]{0,6}$/.test(suffix)) return json({ error: 'Bad house number suffix' }, 400);
+  if (!AFVAL_PROVIDERS.includes(provider)) return json({ error: 'Unknown provider' }, 400);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const q = new URLSearchParams({
+    apikey: env.AFVALWIJZER_APIKEY || AFVAL_KEY, method: 'postcodecheck', postcode, street: '',
+    huisnummer: number, toevoeging: suffix, app_name: 'afvalwijzer', platform: 'web', afvaldata: today, langs: 'nl',
+  });
+  const res = await fetch('https://api.' + provider + '/webservices/appsinput/?' + q, {
+    headers: { 'User-Agent': 'HouseHub/2.0' },
+    cf: { cacheTtl: 6 * 3600, cacheEverything: true },
+  });
+  if (!res.ok) throw new Error('Afvalwijzer ' + res.status);
+  const data = await res.json().catch(() => null);
+  if (!data || data.response === 'NOK') return json({ error: 'Afvalwijzer doesn\u2019t know this address – check the postcode and house number' }, 404);
+
+  const seen = {};
+  const pickups = [];
+  [data.ophaaldagen, data.ophaaldagenNext].forEach((block) => {
+    ((block && block.data) || []).forEach((d) => {
+      if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d.date || '')) return;
+      const key = d.date + '|' + d.type;
+      if (seen[key]) return;
+      seen[key] = true;
+      pickups.push({ date: d.date, type: String(d.type || '').toLowerCase(), name: d.nameType || d.type || 'Afval' });
+    });
+  });
+  pickups.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return json({ pickups });
+}
+
 // ---------------------------------------------------------------- router
 // The access token comes in an Authorization header, or as ?token= for
 // things the page loads as plain images (Ring snapshots).
@@ -409,7 +457,7 @@ export default {
     const p = url.pathname;
 
     if (p === '/' && url.searchParams.get('url')) return icsProxy(url.searchParams.get('url'));
-    if (!/^\/(google|tuya|ring)\//.test(p)) return new Response('House Hub worker is running.', { headers: CORS });
+    if (!/^\/(google|tuya|ring)\//.test(p) && p !== '/afval') return new Response('House Hub worker is running.', { headers: CORS });
     if (!env.HUB_TOKEN) return json({ error: 'HUB_TOKEN is not set on the worker' }, 501);
     if (!authorized(request, url, env)) return json({ error: 'wrong access token' }, 401);
 
@@ -426,6 +474,7 @@ export default {
         const m = /^\/tuya\/stream\/([^/]+)$/.exec(p);
         if (m && request.method === 'GET') return await tuyaStream(env, decodeURIComponent(m[1]));
       }
+      if (p === '/afval' && request.method === 'GET') return await afval(env, url);
       if (p.startsWith('/ring/')) {
         if (!env.HUB_KV) return json({ error: 'Ring needs the HUB_KV binding on the worker' }, 501);
         if (p === '/ring/login' && request.method === 'POST') return await ringLogin(env, request);

@@ -77,7 +77,7 @@
         graham: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
         both: { items: items(['Unload dishwasher', 'Put bins out (if bin day)', 'Lock up & alarm on']), done: {} }
       },
-      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '', google: { url: '', token: '' } }
+      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '', google: { url: '', token: '' }, bins: { postcode: '', number: '', suffix: '' } }
     };
   }
   // Firebase drops empty arrays/objects and may hand arrays back as objects,
@@ -125,7 +125,8 @@
       var g = v.google || {};
       return {
         title: v.title || d.title, calendars: arr(v.calendars), cameras: arr(v.cameras), corsProxy: v.corsProxy || '',
-        google: { url: (g.url || '').replace(/\/+$/, ''), token: g.token || '' }
+        google: { url: (g.url || '').replace(/\/+$/, ''), token: g.token || '' },
+        bins: { postcode: (v.bins && v.bins.postcode) || '', number: (v.bins && v.bins.number) || '', suffix: (v.bins && v.bins.suffix) || '' }
       };
     }
     return v;
@@ -145,6 +146,7 @@
     calendar: { events: [], errors: [] },
     google: { calendars: [], events: [], errors: [], status: 'off' },
     ring: { devices: [], error: '' },
+    bins: { pickups: [], error: '', status: 'off' },
 
     init: function () {
       var cached = lsGet('househub.state', null) || {};
@@ -166,6 +168,10 @@
       setInterval(function () { self.pullGoogle(); }, 2 * 60000);
       this.pullRing();
       setInterval(function () { self.pullRing(); }, 2 * 60000);
+      var bc = lsGet('househub.bins', null);
+      if (bc) this.bins = bc;
+      this.pullBins();
+      setInterval(function () { self.pullBins(); }, 6 * 3600000);
     },
     onChange: function (fn) { this.listeners.push(fn); },
     emit: function () { for (var i = 0; i < this.listeners.length; i++) this.listeners[i](); },
@@ -238,7 +244,7 @@
       }
       this.cache();
       if (first) this.flush();
-      if (touched.indexOf('settings') >= 0) { this.pullCalendar(); this.pullGoogle(); this.pullRing(); }
+      if (touched.indexOf('settings') >= 0) { this.pullCalendar(); this.pullGoogle(); this.pullRing(); this.pullBins(); }
       this.emit();
     },
 
@@ -248,7 +254,7 @@
       this.cache();
       this.emit();
       this.flush();
-      if (key === 'settings') { this.pullCalendar(); this.pullGoogle(); this.pullRing(); }
+      if (key === 'settings') { this.pullCalendar(); this.pullGoogle(); this.pullRing(); this.pullBins(); }
     },
     flush: function () {
       var self = this, base = this.baseUrl();
@@ -309,6 +315,17 @@
     // Two-way Google Calendar sync through the House Hub Cloudflare Worker.
     workerOn: function () { var g = this.data.settings.google; return !!(g.url && g.token); },
     googleOn: function () { return this.workerOn() && this.google.status !== 'unavailable'; },
+    // Bin collection days from Mijn Afvalwijzer (through the worker).
+    pullBins: function () {
+      var self = this, b = this.data.settings.bins;
+      if (!this.workerOn() || !b.postcode || !b.number) { this.bins = { pickups: [], error: '', status: 'off' }; return; }
+      var q = 'postcode=' + encodeURIComponent(b.postcode) + '&number=' + encodeURIComponent(b.number) + '&suffix=' + encodeURIComponent(b.suffix || '');
+      this.googleCall('GET', '/afval?' + q, null, function (err, res) {
+        if (err) { self.bins.status = 'error'; self.bins.error = err.message; }
+        else { self.bins = { pickups: res.pickups || [], error: '', status: 'ok', at: Date.now() }; lsSet('househub.bins', self.bins); }
+        self.emit();
+      });
+    },
     // Ring: doorbell presses / motion and battery, for home-screen notifications.
     pullRing: function () {
       var self = this;
@@ -426,8 +443,25 @@
     return GCAL_COLORS[0];
   }
 
+  var BIN_INFO = {
+    gft: { label: 'GFT (green bin)', color: '#3fbf7f' },
+    restafval: { label: 'Restafval (grey bin)', color: '#8a94a6' },
+    papier: { label: 'Paper (blue bin)', color: '#4f8cff' },
+    pmd: { label: 'PMD / plastic', color: '#f5a623' },
+    plastic: { label: 'Plastic', color: '#f5a623' },
+    glas: { label: 'Glass', color: '#7bd3c7' },
+    textiel: { label: 'Textiles', color: '#b58cff' },
+    kerstbomen: { label: 'Christmas trees', color: '#2e8b57' }
+  };
+  function binLabel(p) { var i = BIN_INFO[p.type]; return i ? i.label : p.name.charAt(0).toUpperCase() + p.name.slice(1); }
+  function binsOn(key) { return Store.bins.pickups.filter(function (p) { return p.date === key; }); }
+
   function allEvents() {
     var out = [];
+    Store.bins.pickups.forEach(function (p) {
+      var info = BIN_INFO[p.type] || { color: '#8a94a6' };
+      out.push({ title: '🗑️ ' + binLabel(p), allDay: true, start: parseDay(p.date), color: info.color, calendar: 'Bin collection', bin: true });
+    });
     Store.data.events.forEach(function (e) {
       var start = parseDay(e.date);
       if (e.time) { var t = e.time.split(':'); start.setHours(+t[0], +t[1]); }
@@ -1155,6 +1189,19 @@
         '<div id="g-status" class="small"></div>' +
         '</div>' +
 
+        '<div class="section-label">Bin collection (Mijn Afvalwijzer)</div>' +
+        '<div class="list" style="padding:16px">' +
+        '<p class="muted small" style="margin-top:0">Shows your bin days in the calendar, and a reminder on the home screen from noon the day before. Uses the House Hub worker.</p>' +
+        '<div class="flex">' +
+        '<div class="grow" style="margin-right:10px"><label class="lbl">Postcode</label><input class="field" id="bin-pc" placeholder="1234AB" value="' + esc(s.bins.postcode) + '" autocapitalize="characters" autocorrect="off"></div>' +
+        '<div style="width:110px;margin-right:10px"><label class="lbl">Number</label><input class="field" id="bin-nr" inputmode="numeric" value="' + esc(s.bins.number) + '"></div>' +
+        '<div style="width:90px"><label class="lbl">Suffix</label><input class="field" id="bin-sx" placeholder="A" value="' + esc(s.bins.suffix) + '" autocorrect="off"></div>' +
+        '</div>' +
+        '<div class="flex wrap" style="margin-top:12px"><button class="btn primary" data-action="set-bins" style="margin:0 10px 10px 0">Save &amp; test</button>' +
+        '<button class="btn danger" data-action="set-bins-off" style="margin:0 10px 10px 0">Remove</button></div>' +
+        '<div id="bin-status" class="small"></div>' +
+        '</div>' +
+
         '<div class="section-label">Other calendars (.ics feeds, read-only)</div>' +
         '<div id="set-cals"></div>' +
         '<form class="list" style="padding:16px" data-form="set-addcal">' +
@@ -1223,6 +1270,15 @@
           '<button class="del" data-action="set-delcal" data-i="' + i + '">✕</button></div>';
       }).join('') + '</div>' : '';
       if (Store.calendar.errors.length) $('set-cals').innerHTML += '<p class="small overdue">' + esc(Store.calendar.errors.join(' · ')) + '</p>';
+      var bs = $('bin-status'), B = Store.bins;
+      if (B.status === 'off') { bs.className = 'small muted'; bs.textContent = Store.workerOn() ? 'Not set up.' : 'Set up the House Hub worker first.'; }
+      else if (B.status === 'error') { bs.className = 'small sync bad'; bs.textContent = '● ' + B.error; }
+      else if (B.status === 'checking') { bs.className = 'small muted'; bs.textContent = 'Checking…'; }
+      else {
+        var todayK = dayKey(), next = B.pickups.filter(function (p) { return p.date >= todayK; }).slice(0, 4);
+        bs.className = 'small sync ok';
+        bs.textContent = next.length ? '● Next: ' + next.map(function (p) { return fmtDayShort(p.date) + ' – ' + binLabel(p); }).join(' · ') : '● Connected, but no upcoming collections found';
+      }
       var gs = $('g-status'), G = Store.google;
       if (!Store.workerOn()) { gs.className = 'small muted'; gs.textContent = 'Not connected.'; }
       else if (G.status === 'unavailable') { gs.className = 'small sync ok'; gs.textContent = '● Worker connected (Google Calendar isn\u2019t set up on it yet – cameras can still use it)'; }
@@ -1288,6 +1344,21 @@
         if (!confirm('Disconnect Google Calendar? Events stay in Google; they just won\u2019t show here.')) return;
         Store.data.settings.google = { url: '', token: '' };
         $('g-url').value = ''; $('g-token').value = '';
+        Store.save('settings');
+      },
+      'set-bins': function () {
+        var pc = $('bin-pc').value.replace(/\s+/g, '').toUpperCase(), nr = $('bin-nr').value.trim();
+        if (!/^\d{4}[A-Z]{2}$/.test(pc)) return alert('Postcode should look like 1234AB');
+        if (!/^\d+$/.test(nr)) return alert('Enter your house number (digits only; letters go in Suffix)');
+        if (!Store.workerOn()) return alert('Set up the House Hub worker above first.');
+        Store.data.settings.bins = { postcode: pc, number: nr, suffix: $('bin-sx').value.trim() };
+        Store.bins.status = 'checking';
+        Store.save('settings');
+      },
+      'set-bins-off': function () {
+        Store.data.settings.bins = { postcode: '', number: '', suffix: '' };
+        $('bin-pc').value = ''; $('bin-nr').value = ''; $('bin-sx').value = '';
+        try { localStorage.removeItem('househub.bins'); } catch (e) { /* ignore */ }
         Store.save('settings');
       },
       'set-proxy': function () { Store.data.settings.corsProxy = $('set-proxy').value.trim(); Store.save('settings'); },
@@ -1372,13 +1443,23 @@
       if (d.battery != null && d.battery <= 20) out.push({ cls: 'warn', icon: '🔋', title: d.name + ' battery is at ' + d.battery + '%', sub: 'Time to charge the Ring doorbell' });
     });
 
+    // Bins: the day before (from noon) and the morning of collection.
+    var binsTomorrow = binsOn(tomorrow), binsToday = binsOn(today);
+    if (binsToday.length && now.getHours() < 12) {
+      out.push({ cls: 'warn', icon: '🗑️', app: 'calendar', title: 'Bin collection today: ' + binsToday.map(binLabel).join(' + '), sub: 'Make sure it\u2019s out at the kerb' });
+    }
+    if (binsTomorrow.length && now.getHours() >= 12) {
+      out.push({ cls: 'warn', icon: '🗑️', app: 'calendar', title: 'Bin day tomorrow: ' + binsTomorrow.map(binLabel).join(' + '), sub: 'Put it out tonight' });
+    }
+
     // Household notes (dismissable).
     Store.data.notes.forEach(function (n) {
       out.push({ cls: 'note', icon: '📝', title: n.text, sub: (WHO[n.who] ? 'From ' + WHO[n.who].label + ' · ' : '') + fmtDayShort(dayKey(new Date(n.at))), dismiss: n.id });
     });
 
     // Calendar: rest of today, then tomorrow.
-    var todays = eventsOn(events, now).filter(function (e) { return e.allDay || (e.end || e.start) >= now; });
+    var calEvents = events.filter(function (e) { return !e.bin; }); // bins get their own reminder below
+    var todays = eventsOn(calEvents, now).filter(function (e) { return e.allDay || (e.end || e.start) >= now; });
     if (todays.length) {
       out.push({
         cls: '', icon: '📅', app: 'calendar',
@@ -1386,7 +1467,7 @@
         sub: todays.slice(0, 4).map(function (e) { return (e.allDay ? 'All day' : fmtTime(e.start)) + ' ' + e.title; }).join(' · ')
       });
     }
-    var tom = eventsOn(events, addDays(now, 1));
+    var tom = eventsOn(calEvents, addDays(now, 1));
     if (tom.length) {
       out.push({
         cls: '', icon: '🗓️', app: 'calendar', title: 'Tomorrow: ' + (tom.length === 1 ? tom[0].title : tom.length + ' events'),

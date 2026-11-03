@@ -135,6 +135,19 @@ In the worker's **Settings → Variables and Secrets**, add:
 
 Then open ⚙️ Settings in the hub and tap **Save & test**. It should list your calendars.
 
+## Bin collection reminders (Mijn Afvalwijzer)
+
+After you paste the latest worker code into Cloudflare, go to ⚙️ **Settings → Bin collection**, enter your
+postcode and house number (with any letter in *Suffix*), and tap **Save & test**. You then get:
+- bin days in the calendar, coloured by bin type
+- **"🗑️ Bin day tomorrow: GFT – put it out tonight"** on the home screen from 12:00 the day before
+- **"Bin collection today"** until 12:00 on the day
+
+The worker reads the same schedule the Mijn Afvalwijzer app shows, using the same
+unofficial address Home Assistant's afvalwijzer integration uses, and refreshes it twice a
+day. If Mijn Afvalwijzer changes it, the Settings status line will show an error.
+The reminders appear in the hub; they aren't phone push notifications.
+
 ## Cameras, with no box at home
 
 | Camera | What you get in the hub | How |
