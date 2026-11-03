@@ -506,3 +506,42 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
 .home-grid > .grid-row:first-child { -webkit-box-flex: 3; -webkit-flex: 3 1 0; flex: 3 1 0; }
 .home-grid > .grid-row:last-child { -webkit-box-flex: 2; -webkit-flex: 2 1 0; flex: 2 1 0; }
 @media (max-width: 600px) { .home-grid > .grid-row:first-child, .home-grid > .grid-row:last-child { display: block; } }
+
+/* v3.1: agenda opens the calendar, Jess/Graham to-do columns, grocery utility */
+.p-agenda { cursor: pointer; }
+.p-agenda:active { background: #1e2637; }
+.pc-link { font-size: 13px; color: #6ea0ff; text-transform: none; letter-spacing: 0; font-weight: 600; cursor: pointer; }
+.ag-item.past { opacity: .45; }
+
+.todo-cols { -webkit-box-align: stretch; -webkit-align-items: stretch; align-items: stretch; }
+.tcol { min-width: 0; }
+.tcol:first-child { margin-right: 18px; padding-right: 18px; border-right: 1px solid #232b3b; }
+.tcol-head { padding-bottom: 6px; border-bottom: 1px solid #232b3b; cursor: pointer; }
+.tcol-head .name { font-size: 19px; font-weight: 700; }
+.tcol-list { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+.tcol .pt { padding: 7px 0; border-bottom: 0; }
+.tcol .pt-text { font-size: 17px; }
+.tcol .pt-add { padding: 8px 0 0; font-size: 15px; }
+
+.util-groc { -webkit-box-flex: 2; -webkit-flex: 2 1 0; flex: 2 1 0; min-width: 0; margin-right: 12px; background: #222a3b; border-radius: 14px; padding: 10px 12px; }
+.ug-head { margin-bottom: 4px; }
+.ug-head .util-label { margin: 0; font-size: 16px; }
+.ug-list { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+.ug-item { padding: 5px 0; font-size: 16px; cursor: pointer; }
+.ug-item .pt-check { width: 22px; height: 22px; border-radius: 11px; margin-right: 10px; }
+.ug-item:active .pt-check { background: #3fbf7f; border-color: #3fbf7f; }
+.ug-add { margin-top: 6px; }
+.ug-add .field { padding: 8px 10px; font-size: 16px; margin-right: 8px; }
+.util-snap { -webkit-box-flex: 1; -webkit-flex: 1 1 0; flex: 1 1 0; margin-right: 0; }
+
+@media (max-width: 600px) {
+  .todo-cols { display: block; }
+  .tcol:first-child { margin: 0 0 12px; padding: 0 0 8px; border-right: 0; }
+  .utils { display: block; }
+  .util-groc { margin: 0 0 10px; }
+  .ug-list { max-height: 260px; }
+}
+@media (max-width: 600px) {
+  .tcol, .util-groc { display: block; }
+  .tcol .tcol-list, .util-groc .ug-list { -webkit-box-flex: 0; -webkit-flex: none; flex: none; overflow: visible; max-height: none; }
+}

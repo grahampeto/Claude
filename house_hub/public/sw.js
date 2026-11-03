@@ -2,8 +2,8 @@
 // Android. App files are fetched network-first (so updates show up straight
 // away) with the cached copy as a fallback. Firebase, calendar feeds and
 // cameras are other origins and are never touched.
-var CACHE = 'house-hub-v14';
-var FILES = ['./', 'index.html', 'app.css', 'app.js', 'ics.js', 'manifest.webmanifest', 'qrcode.js', 'icon.png', 'icon-192.png', 'icon-512.png',
+var CACHE = 'house-hub-v15';
+var FILES = ['./', 'index.html', 'app.css', 'app.js', 'ics.js', 'manifest.webmanifest', 'icon.png', 'icon-192.png', 'icon-512.png',
   'icons/calendar.svg', 'icons/groceries.svg', 'icons/todo.svg', 'icons/cameras.svg', 'icons/settings.svg'];
 
 self.addEventListener('install', function (e) {

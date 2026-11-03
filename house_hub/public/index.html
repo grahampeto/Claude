@@ -31,13 +31,13 @@
 
   <div class="home-grid grow flex col">
     <div class="grid-row flex">
-      <section class="panel-card p-agenda flex col">
-        <div class="pc-title">Today’s agenda &amp; meals</div>
+      <section class="panel-card p-agenda flex col" data-action="open" data-app="calendar">
+        <div class="pc-title flex between center"><span>Today’s agenda</span><span class="pc-link">Calendar ›</span></div>
         <div class="pc-body grow" id="agenda"></div>
       </section>
       <section class="panel-card p-todos flex col">
-        <div class="pc-title flex between center"><span data-action="open" data-app="todo">To-dos ›</span><div class="mini-tabs flex" id="home-todo-tabs"></div></div>
-        <div class="pc-body grow" id="home-todos"></div>
+        <div class="pc-title flex between center"><span>To-dos</span><span class="pc-link" data-action="open" data-app="todo">Full list ›</span></div>
+        <div class="pc-body grow flex todo-cols" id="home-todos"></div>
       </section>
     </div>
     <div class="grid-row flex">
@@ -47,7 +47,14 @@
       </section>
       <section class="panel-card p-utils flex col">
         <div class="pc-title">Quick utilities</div>
-        <div class="pc-body grow utils flex" id="utilities"></div>
+        <div class="pc-body grow utils flex">
+          <div class="util-groc flex col">
+            <div class="ug-head flex between center"><span class="util-label">🛒 Grocery list</span><span class="pc-link" data-action="open" data-app="groceries">Open ›</span></div>
+            <div class="ug-list grow" id="home-groc"></div>
+            <form class="ug-add flex" data-form="home-groc-add"><input class="field grow" id="home-groc-input" placeholder="Add an item…" autocomplete="off"><button class="btn primary small" type="submit">Add</button></form>
+          </div>
+          <button class="util util-snap" data-action="util-snap"><span class="util-icon">📷</span><span class="util-label">Camera snap</span><span class="util-sub muted small" id="snap-sub"></span></button>
+        </div>
       </section>
     </div>
   </div>
@@ -73,7 +80,6 @@
 <div id="dimmer" class="hidden"><div class="clock" id="dim-clock"></div></div>
 
 <script src="ics.js"></script>
-<script src="qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -16,10 +16,10 @@ and big buttons along the bottom for the sub-apps:
 
 **Home screen (tablet layout):**
 - **Header:** clock and date, the live weather in the middle (tap it for a 14-day forecast), and the title with ⚙️.
-- **Today's agenda & meals:** doorbell rings, low battery, bin days, today's and tomorrow's events, and **dinner today/tomorrow**. Tap a dinner to pick a saved meal (it can add the ingredients to the shopping list) or type one.
-- **To-dos:** All / Jess / Graham / Together tabs. Tick to finish, tap to edit, *+ Add to-do*. *To-dos ›* opens the full list, including list-only and done items.
+- **Today's agenda:** everything in today's calendar (finished events are dimmed), plus doorbell-ring, low-battery and bin-day alerts. Tap the panel to open the calendar.
+- **To-dos:** a column each for **Jess** and **Graham** (to-dos marked for the home screen). Tick to finish, tap to edit, *+ Add to-do*. *Full list ›* shows everything, including Together, list-only and done items.
 - **Pinned family notes:** notes for everyone. *+ Note* to pin one, ✕ to unpin.
-- **Quick utilities:** a **Guest Wi-Fi QR** code (set the network in ⚙️ Settings) and a **Camera snap** pop-up.
+- **Quick utilities:** the **grocery list** (tick to remove, add items inline) and a **Camera snap** pop-up.
 - **Dock:** Calendar, Groceries, Cameras and Settings.
 
 On phones the panels stack and the page scrolls.
