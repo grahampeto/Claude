@@ -448,6 +448,22 @@ async function ringLiveStart(env, request) {
   return json({ sessionId, sdp: data.sdp });
 }
 
+// Two-way talk: Ring keeps the doorbell's speaker off ("stealth mode")
+// until asked. ring-client-api calls this activateCameraSpeaker().
+async function ringLiveSpeaker(env, request) {
+  const b = await request.json().catch(() => ({}));
+  if (!b.sessionId) return json({ error: 'no session' }, 400);
+  const body = JSON.stringify({ session_id: b.sessionId, actions: ['turn_off_stealth_mode'] });
+  let lastErr = null;
+  for (const method of ['PATCH', 'PUT', 'POST']) {
+    try {
+      await ringFetch(env, RING_LIVE + '/options', { method, body });
+      return json({ ok: true });
+    } catch (e) { lastErr = e; if (!/40[45]/.test(e.message)) break; }
+  }
+  throw new Error('Ring didn\u2019t switch on the doorbell speaker (' + (lastErr ? lastErr.message : 'unknown') + ')');
+}
+
 async function ringLiveEnd(env, request) {
   const b = await request.json().catch(() => ({}));
   if (b.sessionId) {
@@ -540,6 +556,7 @@ export default {
         if (p === '/ring/devices' && request.method === 'GET') return await ringDevices(env);
         if (p === '/ring/live/start' && request.method === 'POST') return await ringLiveStart(env, request);
         if (p === '/ring/live/end' && request.method === 'POST') return await ringLiveEnd(env, request);
+        if (p === '/ring/live/speaker' && request.method === 'POST') return await ringLiveSpeaker(env, request);
         const m = /^\/ring\/snapshot\/([^/]+)$/.exec(p);
         if (m && request.method === 'GET') return await ringSnapshot(env, decodeURIComponent(m[1]));
       }

@@ -1141,21 +1141,40 @@
     },
     fail: function (sess, why) {
       if (sess.done) return;
+      if (sess.mic) {
+        // Ring wouldn't take two-way audio: go back to listen-only.
+        var v = sess.video;
+        this.end(sess);
+        this.talkButton(v, '🎤 Talk', false);
+        Toast.show('Talking isn\u2019t available (' + (why || 'refused') + ') – back to listen-only');
+        this.start(v);
+        return;
+      }
       this.end(sess);
       var age = sess.video.parentNode && sess.video.parentNode.querySelector('.cam-age');
       if (age) age.setAttribute('data-failed', '1');
       this.label(sess.video, 'Live view unavailable – showing snapshot' + (why ? ' (' + why + ')' : ''));
       sess.video.className = 'cam-media ring-video hidden';
     },
-    start: function (video) {
+    find: function (video) {
+      for (var i = 0; i < this.sessions.length; i++) if (this.sessions[i].video === video && !this.sessions[i].done) return this.sessions[i];
+      return null;
+    },
+    talkButton: function (video, text, on) {
+      var b = video.parentNode && video.parentNode.querySelector('.ring-talk');
+      if (b) { b.textContent = text; b.className = 'btn ring-talk' + (on ? ' on' : ''); }
+    },
+    // mic: a microphone MediaStream for two-way talk (otherwise listen-only).
+    start: function (video, mic) {
       var self = this;
       if (!this.supported()) { this.label(video, 'Snapshot (live view needs a newer browser)'); return; }
-      var sess = { video: video, deviceId: video.getAttribute('data-ring-live'), done: false, sessionId: null };
+      var sess = { video: video, deviceId: video.getAttribute('data-ring-live'), done: false, sessionId: null, mic: mic || null };
       this.sessions.push(sess);
       var pc = sess.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       try {
         pc.addTransceiver('video', { direction: 'recvonly' });
-        pc.addTransceiver('audio', { direction: 'recvonly' });
+        if (mic) pc.addTransceiver(mic.getAudioTracks()[0], { direction: 'sendrecv', streams: [mic] });
+        else pc.addTransceiver('audio', { direction: 'recvonly' });
       } catch (e) { return this.fail(sess, 'unsupported'); }
       pc.ontrack = function (ev) {
         var stream = ev.streams && ev.streams[0];
@@ -1169,7 +1188,17 @@
         video.className = 'cam-media ring-video';
         var snd = video.parentNode && video.parentNode.querySelector('.ring-sound');
         if (snd) snd.className = 'btn small ring-sound';
-        self.label(video, '● Live', true);
+        self.label(video, sess.mic ? '● Live · talking' : '● Live', true);
+        if (sess.mic && !sess.speakerOn) {
+          sess.speakerOn = true;
+          video.muted = false;
+          var snd2 = video.parentNode && video.parentNode.querySelector('.ring-sound');
+          if (snd2) snd2.textContent = '🔊';
+          self.talkButton(video, '🔴 Talking – tap to mute', true);
+          Store.googleCall('POST', '/ring/live/speaker', { sessionId: sess.sessionId }, function (err) {
+            if (err) Toast.show('The doorbell speaker didn\u2019t switch on – they may not hear you');
+          });
+        }
       };
       pc.oniceconnectionstatechange = function () {
         var st = pc.iceConnectionState;
@@ -1201,7 +1230,39 @@
       clearTimeout(sess.timer);
       try { sess.pc.close(); } catch (e) { /* already closed */ }
       try { sess.video.pause(); sess.video.srcObject = null; } catch (e) { /* ignore */ }
+      if (sess.mic) { sess.mic.getTracks().forEach(function (t) { t.stop(); }); sess.mic = null; }
       if (sess.sessionId) Store.googleCall('POST', '/ring/live/end', { sessionId: sess.sessionId }, function () {});
+    },
+    // Talk button: first tap reconnects with the microphone, then it toggles mute.
+    talk: function (video) {
+      var self = this, sess = this.find(video);
+      if (sess && sess.mic && !sess.talkEnded) {
+        var tr = sess.mic.getAudioTracks()[0];
+        tr.enabled = !tr.enabled;
+        this.talkButton(video, tr.enabled ? '🔴 Talking – tap to mute' : '🎤 Muted – tap to talk', tr.enabled);
+        this.label(video, tr.enabled ? '● Live · talking' : '● Live · mic muted', true);
+        return;
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Toast.show('This browser can\u2019t use the microphone here');
+      this.talkButton(video, 'Starting microphone…', false);
+      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(function (mic) {
+        if (sess) self.end(sess);
+        self.label(video, 'Connecting with microphone…');
+        self.talkButton(video, 'Connecting…', false);
+        self.start(video, mic);
+      })['catch'](function () {
+        self.talkButton(video, '🎤 Talk', false);
+        Toast.show('Microphone access was refused – allow it in the browser settings to talk');
+      });
+    },
+    // Leaving full screen: stop sending the microphone (keeps watching).
+    stopTalk: function (video) {
+      var sess = this.find(video);
+      if (!sess || !sess.mic) return;
+      sess.mic.getTracks().forEach(function (t) { t.enabled = false; t.stop(); });
+      this.talkButton(video, '🎤 Talk', false);
+      this.label(video, '● Live', true);
+      sess.talkEnded = true;
     },
     stopAll: function () {
       for (var i = 0; i < this.sessions.length; i++) this.end(this.sessions[i]);
@@ -1241,7 +1302,8 @@
         return '<img class="cam-media ring-snap" data-cam="' + c.id + '" data-src="' + u + '" alt="">' +
           '<video class="cam-media ring-video hidden" data-ring-live="' + esc(c.deviceId) + '" autoplay muted playsinline webkit-playsinline></video>' +
           '<div class="cam-age" data-age="' + c.id + '">Connecting live…</div>' +
-          '<button class="btn small ring-sound hidden" data-action="ring-sound" aria-label="Sound">🔇</button>';
+          '<button class="btn small ring-sound hidden" data-action="ring-sound" aria-label="Sound">🔇</button>' +
+          '<button class="btn ring-talk" data-action="ring-talk">🎤 Talk</button>';
       }
       if (c.type === 'hls') return '<video class="cam-media" data-cam="' + c.id + '" src="' + u + '" autoplay muted playsinline webkit-playsinline></video>';
       if (c.type === 'iframe') return '<iframe class="cam-media" data-cam="' + c.id + '" src="' + u + '" frameborder="0" style="height:' + (full ? '100%' : '300px') + '"></iframe>';
@@ -1918,12 +1980,20 @@
       var ovl = document.querySelector('.live-overlay');
       if (!ovl) return;
       var inner = ovl.querySelector('.cam-inner');
+      var talkV = inner && inner.querySelector('video[data-ring-live]');
+      if (talkV) RingLive.stopTalk(talkV);
       if (inner && ovl._home && ovl._home.parentNode) {
         inner.setAttribute('data-action', 'live-full');
         ovl._home.appendChild(inner);
         playAll(inner);
       }
       ovl.parentNode.removeChild(ovl);
+      return;
+    }
+    if (action === 'ring-talk') {
+      e.stopPropagation();
+      var tv = el.parentNode.querySelector('video[data-ring-live]');
+      if (tv) RingLive.talk(tv);
       return;
     }
     if (action === 'ring-sound') {

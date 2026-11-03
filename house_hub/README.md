@@ -193,7 +193,7 @@ Notes:
 3. **In the Ring app,** turn on **Snapshot Capture** for the doorbell (Device → Settings). Otherwise battery doorbells only take a new picture when there's motion.
 
 Notes:
-- **Live view** starts when you tap **📷 Cameras** on the home screen (doorbell and garage side by side) or open the Cameras screen. It stops when you close it, or after a few idle minutes on the wall iPad, to save the doorbell battery. Tap 🔇 for sound. If Ring refuses, the tile shows the latest snapshot and says why. It needs iOS 15 or newer (WebRTC) and the latest worker code.
+- **Live view** starts when you tap **📷 Cameras** on the home screen (doorbell and garage side by side) or open the Cameras screen. It stops when you close it, or after a few idle minutes on the wall iPad, to save the doorbell battery. Tap 🔇 for sound. Tap a camera for full screen; there, **🎤 Talk** lets you speak through the doorbell. The first tap asks for microphone access and briefly reconnects, then the button toggles talk/mute, and closing full screen turns the microphone off. If Ring refuses, the tile shows the latest snapshot and says why. It needs iOS 15 or newer (WebRTC) and the latest worker code.
 - Doorbell notifications can show **up to 2 minutes late**, because the hub checks Ring every 2 minutes.
 - Ring lists the hub as **House Hub** under *Control Center → Authorized Client Devices*. You can remove it there at any time.
 - Because this uses Ring's unofficial API, Ring could change or block it without warning. If it stops working, log in again from Settings.

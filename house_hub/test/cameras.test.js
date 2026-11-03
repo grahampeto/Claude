@@ -119,3 +119,25 @@ test('Ring live view: offer goes to Ring, answer comes back, end closes it', asy
     assert.strictEqual(bad.status, 400);
   } finally { global.fetch = real; }
 });
+
+test('Ring talk: switches the doorbell speaker on (tries PATCH, then PUT)', async function () {
+  var worker = (await import('../house-hub.worker.js?talk')).default;
+  var env = { HUB_TOKEN: 'tok', HUB_KV: kv() };
+  await env.HUB_KV.put('ring_refresh_token', 'r0');
+  var real = global.fetch, calls = [];
+  global.fetch = async function (u, init) {
+    u = String(u); init = init || {};
+    if (u === 'https://oauth.ring.com/oauth/token') return Response.json({ access_token: 'a', refresh_token: 'r1', expires_in: 3600 });
+    calls.push(init.method + ' ' + u.split('/').pop() + ' ' + init.body);
+    if (init.method === 'PATCH') return new Response('', { status: 405 });
+    return new Response(null, { status: 204 });
+  };
+  try {
+    var r = await worker.fetch(req('/ring/live/speaker', { method: 'POST', body: JSON.stringify({ sessionId: 's1' }) }), env);
+    assert.strictEqual(r.status, 200);
+    assert.deepStrictEqual(calls, [
+      'PATCH options {"session_id":"s1","actions":["turn_off_stealth_mode"]}',
+      'PUT options {"session_id":"s1","actions":["turn_off_stealth_mode"]}'
+    ]);
+  } finally { global.fetch = real; }
+});
