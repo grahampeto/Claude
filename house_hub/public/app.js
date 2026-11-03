@@ -1718,6 +1718,29 @@
     Store.pullGoogle(); // phones: catch up after being in the background
   }, false);
 
+  // Auto-update: the wall iPad never gets reloaded by hand, so every 15
+  // minutes check whether a new version was published and, if so, reload
+  // while nobody is using it (on the home screen, idle for a minute).
+  var appVersion = null, updateReady = false;
+  function checkForUpdate() {
+    var x = new XMLHttpRequest();
+    x.open('HEAD', 'app.js?check=' + Date.now(), true);
+    x.onreadystatechange = function () {
+      if (x.readyState !== 4 || x.status !== 200) return;
+      var v = x.getResponseHeader('ETag') || x.getResponseHeader('Last-Modified');
+      if (!v) return;
+      if (appVersion === null) appVersion = v;
+      else if (v !== appVersion) updateReady = true;
+    };
+    x.send(null);
+  }
+  checkForUpdate();
+  setInterval(checkForUpdate, 15 * 60000);
+  setInterval(function () {
+    var focused = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+    if (updateReady && !current && !focused && !$('modal-root').innerHTML && Date.now() - lastTouch > 60000) location.reload();
+  }, 30000);
+
   // Offline support / installable app (not available on very old iOS – that's fine).
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js');

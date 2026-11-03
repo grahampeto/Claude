@@ -2,11 +2,11 @@
 // Android. App files are fetched network-first (so updates show up straight
 // away) with the cached copy as a fallback. Firebase, calendar feeds and
 // cameras are other origins and are never touched.
-var CACHE = 'house-hub-v7';
+var CACHE = 'house-hub-v8';
 var FILES = ['./', 'index.html', 'app.css', 'app.js', 'ics.js', 'manifest.webmanifest', 'icon.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
+  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES.map(function (f) { return new Request(f, { cache: 'reload' }); })); }).then(function () { return self.skipWaiting(); }));
 });
 
 self.addEventListener('activate', function (e) {
@@ -18,7 +18,9 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-  e.respondWith(fetch(req).then(function (res) {
+  // cache: 'no-cache' makes the browser check with GitHub Pages every time
+  // (cheap, via ETag) instead of reusing a copy for up to 10 minutes.
+  e.respondWith(fetch(req, { cache: 'no-cache' }).then(function (res) {
     var copy = res.clone();
     caches.open(CACHE).then(function (c) { c.put(req, copy); });
     return res;
