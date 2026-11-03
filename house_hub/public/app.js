@@ -1489,16 +1489,15 @@
     var out = [], now = new Date(), today = dayKey(now), tomorrow = dayKey(addDays(now, 1));
     var events = allEvents();
 
-    // Ring doorbell: recent presses / motion, low battery.
+    // Ring doorbell: recent presses and low battery.
     Store.ring.devices.forEach(function (d) {
-      var ding = null, motion = null;
+      // Only doorbell presses – motion is too noisy for the home screen.
+      var ding = null;
       d.events.forEach(function (e) {
         var at = parseISO(e.at), mins = (now - at) / 60000;
         if (e.kind === 'ding' && mins < 30 && (!ding || at > ding)) ding = at;
-        if (e.kind === 'motion' && mins < 10 && (!motion || at > motion)) motion = at;
       });
       if (ding) out.push({ cls: 'warn', icon: '🔔', app: 'cameras', title: 'Someone rang the doorbell at ' + fmtTime(ding), sub: d.name + ' · tap to see the camera' });
-      else if (motion) out.push({ cls: '', icon: '👀', app: 'cameras', title: 'Motion at ' + d.name + ' (' + fmtTime(motion) + ')', sub: 'Tap to see the camera' });
       if (d.battery != null && d.battery <= 20) out.push({ cls: 'warn', icon: '🔋', title: d.name + ' battery is at ' + d.battery + '%', sub: 'Time to charge the Ring doorbell' });
     });
 
