@@ -65,19 +65,19 @@
   // sync is set up, mirrored to a Firebase Realtime Database through its REST
   // API (plain XHR + EventSource, so it works on old iOS). Each top-level key
   // is written on its own so two devices editing different lists never clash.
-  var STATE_KEYS = ['events', 'groceries', 'meals', 'todos', 'notes', 'checklists', 'settings'];
+  var STATE_KEYS = ['events', 'groceries', 'meals', 'mealplan', 'todos', 'notes', 'checklists', 'settings'];
 
   function items(list) { return list.map(function (t, i) { return { id: 'd' + i, text: t }; }); }
   function defaults() {
     return {
-      events: [], todos: [], notes: [], meals: [],
+      events: [], todos: [], notes: [], meals: [], mealplan: {},
       groceries: { items: [], history: [] },
       checklists: {
         jess: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
         graham: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
         both: { items: items(['Unload dishwasher', 'Put bins out (if bin day)', 'Lock up & alarm on']), done: {} }
       },
-      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '', google: { url: '', token: '' }, bins: { postcode: '', number: '', suffix: '' }, weather: { name: 'Veldhoven', lat: 51.4183, lon: 5.4028 } }
+      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '', google: { url: '', token: '' }, bins: { postcode: '', number: '', suffix: '' }, weather: { name: 'Veldhoven', lat: 51.4183, lon: 5.4028 }, wifi: { ssid: '', password: '', security: 'WPA', hidden: false } }
     };
   }
   // Firebase drops empty arrays/objects and may hand arrays back as objects,
@@ -90,6 +90,7 @@
   function normalize(key, v) {
     var d = defaults()[key];
     if (key === 'events' || key === 'todos' || key === 'notes') return arr(v);
+    if (key === 'mealplan') return v && typeof v === 'object' && Object.prototype.toString.call(v) !== '[object Array]' ? v : {};
     if (key === 'meals') return arr(v).map(function (m) { m.ingredients = arr(m.ingredients); return m; });
     if (key === 'groceries') {
       v = v || {};
@@ -127,7 +128,8 @@
         title: v.title || d.title, calendars: arr(v.calendars), cameras: arr(v.cameras), corsProxy: v.corsProxy || '',
         google: { url: (g.url || '').replace(/\/+$/, ''), token: g.token || '' },
         bins: { postcode: (v.bins && v.bins.postcode) || '', number: (v.bins && v.bins.number) || '', suffix: (v.bins && v.bins.suffix) || '' },
-        weather: v.weather && typeof v.weather.lat === 'number' ? { name: v.weather.name || '', lat: v.weather.lat, lon: v.weather.lon } : d.weather
+        weather: v.weather && typeof v.weather.lat === 'number' ? { name: v.weather.name || '', lat: v.weather.lat, lon: v.weather.lon } : d.weather,
+        wifi: { ssid: (v.wifi && v.wifi.ssid) || '', password: (v.wifi && v.wifi.password) || '', security: (v.wifi && v.wifi.security) || 'WPA', hidden: !!(v.wifi && v.wifi.hidden) }
       };
     }
     return v;
@@ -455,7 +457,22 @@
       var first = $('modal-root').querySelector('input, textarea');
       if (first) setTimeout(function () { first.focus(); }, 50);
     },
-    close: function () { $('modal-root').innerHTML = ''; this.onSave = null; },
+    // A pop-up with just a Close button (QR code, camera snap).
+    info: function (title, html, onClose) {
+      $('modal-root').innerHTML =
+        '<div class="modal-bg" data-action="modal-bg"><div class="modal">' +
+        '<h3>' + esc(title) + '</h3>' + html +
+        '<div class="modal-actions flex"><button class="btn primary" data-action="modal-cancel">Close</button></div>' +
+        '</div></div>';
+      this.onSave = null;
+      this.onClose = onClose || null;
+    },
+    close: function () {
+      var cb = this.onClose;
+      this.onClose = null;
+      if (cb) cb();
+      $('modal-root').innerHTML = ''; this.onSave = null;
+    },
     val: function (name) { var el = $('modal-root').querySelector('[name="' + name + '"]'); return el ? el.value.trim() : ''; },
     seg: function (name) { var el = $('modal-root').querySelector('.seg[data-name="' + name + '"] .on'); return el ? el.getAttribute('data-value') : ''; }
   };
@@ -1278,6 +1295,19 @@
         '<div class="text grow">This device is the wall display<div class="meta">Goes back home after 3 idle minutes and dims 23:00–06:00. Only affects this device.</div></div></div>' +
         '</div>' +
 
+        '<div class="section-label">Guest Wi-Fi (QR code on the home screen)</div>' +
+        '<div class="list" style="padding:16px">' +
+        '<label class="lbl">Network name</label><input class="field" id="wifi-ssid" value="' + esc(s.wifi.ssid) + '" autocapitalize="off" autocorrect="off">' +
+        '<label class="lbl" style="margin-top:10px">Password</label><input class="field" id="wifi-pass" value="' + esc(s.wifi.password) + '" autocapitalize="off" autocorrect="off">' +
+        '<label class="lbl" style="margin-top:10px">Security</label><select class="field" id="wifi-sec">' +
+        [['WPA', 'WPA / WPA2 / WPA3 (most networks)'], ['WEP', 'WEP (old)'], ['nopass', 'None (open network)']].map(function (o) {
+          return '<option value="' + o[0] + '"' + (s.wifi.security === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('') + '</select>' +
+        '<label class="chk" style="margin-top:10px"><input type="checkbox" id="wifi-hidden"' + (s.wifi.hidden ? ' checked' : '') + '> Hidden network</label>' +
+        '<button class="btn primary" data-action="set-wifi" style="margin-top:12px">Save</button>' +
+        '<p class="muted small" style="margin-bottom:0">Shared with every device using your household key. Use your guest network rather than your main one if you have one.</p>' +
+        '</div>' +
+
         '<div class="section-label">House Hub worker (Google Calendar &amp; cameras)</div>' +
         '<div class="list" style="padding:16px">' +
         '<p class="muted small" style="margin-top:0">Your free Cloudflare Worker (see README). It does two-way Google Calendar sync and fetches the Ring and LSC/Tuya cameras from the cloud – nothing needs to stay on at home.</p>' +
@@ -1431,6 +1461,11 @@
         Store.setSync(cfg);
         $('set-db').value = cfg.db; $('set-key').value = cfg.key; $('set-paste').value = '';
       },
+      'set-wifi': function () {
+        Store.data.settings.wifi = { ssid: $('wifi-ssid').value.trim(), password: $('wifi-pass').value, security: $('wifi-sec').value, hidden: $('wifi-hidden').checked };
+        Store.save('settings');
+        Toast.show(Store.data.settings.wifi.ssid ? 'Guest Wi-Fi saved' : 'Guest Wi-Fi removed');
+      },
       'set-weather': function () {
         var name = $('set-weather').value.trim();
         if (!name) return;
@@ -1538,58 +1573,121 @@
   };
 
   // ------------------------------------------------------------------ home
-  function notifications() {
+  // Today's agenda: alerts that pop up (doorbell, battery, bins), the day's
+  // events, tomorrow at a glance, and what's for dinner.
+  function agendaItems() {
     var out = [], now = new Date(), today = dayKey(now), tomorrow = dayKey(addDays(now, 1));
-    var events = allEvents();
 
-    // Ring doorbell: recent presses and low battery.
     Store.ring.devices.forEach(function (d) {
-      // Only doorbell presses – motion is too noisy for the home screen.
-      var ding = null;
+      var ding = null; // only doorbell presses – motion is too noisy
       d.events.forEach(function (e) {
         var at = parseISO(e.at), mins = (now - at) / 60000;
         if (e.kind === 'ding' && mins < 30 && (!ding || at > ding)) ding = at;
       });
-      if (ding) out.push({ cls: 'warn', icon: '🔔', app: 'cameras', title: 'Someone rang the doorbell at ' + fmtTime(ding), sub: d.name + ' · tap to see the camera' });
-      if (d.battery != null && d.battery <= 20) out.push({ cls: 'warn', icon: '🔋', title: d.name + ' battery is at ' + d.battery + '%', sub: 'Time to charge the Ring doorbell' });
+      if (ding) out.push({ cls: 'alert', icon: '🔔', app: 'cameras', text: 'Someone rang the doorbell at ' + fmtTime(ding) });
+      if (d.battery != null && d.battery <= 20) out.push({ cls: 'alert', icon: '🔋', text: d.name + ' battery ' + d.battery + '% – charge it' });
     });
 
-    // Bins: the day before (from noon) and the morning of collection.
-    var binsTomorrow = binsOn(tomorrow), binsToday = binsOn(today);
-    if (binsToday.length && now.getHours() < 12) {
-      out.push({ cls: 'warn', icon: '🗑️', app: 'calendar', title: 'Bin collection today: ' + binsToday.map(binLabel).join(' + '), sub: 'Make sure it\u2019s out at the kerb' });
-    }
-    if (binsTomorrow.length && now.getHours() >= 12) {
-      out.push({ cls: 'warn', icon: '🗑️', app: 'calendar', title: 'Bin day tomorrow: ' + binsTomorrow.map(binLabel).join(' + '), sub: 'Put it out tonight' });
-    }
+    var binsToday = binsOn(today), binsTomorrow = binsOn(tomorrow);
+    function short(p) { return { gft: 'GFT', pmd: 'PMD', restafval: 'Restafval', papier: 'Paper', glas: 'Glass', textiel: 'Textiles' }[p.type] || binLabel(p); }
+    if (binsToday.length && now.getHours() < 12) out.push({ cls: 'bin', icon: '🗑️', app: 'calendar', text: 'Bins today: ' + binsToday.map(short).join(' + ') });
+    if (binsTomorrow.length) out.push({ cls: 'bin', icon: '🗑️', app: 'calendar', text: 'Bins tomorrow: ' + binsTomorrow.map(short).join(' + '), sub: now.getHours() >= 12 ? 'Put it out tonight' : '' });
 
-    // Household notes (dismissable).
-    Store.data.notes.forEach(function (n) {
-      out.push({ cls: 'note', icon: '📝', title: n.text, sub: (WHO[n.who] ? 'From ' + WHO[n.who].label + ' · ' : '') + fmtDayShort(dayKey(new Date(n.at))), dismiss: n.id });
+    var cal = allEvents().filter(function (e) { return !e.bin; });
+    var todays = eventsOn(cal, now).filter(function (e) { return e.allDay || (e.end || e.start) >= now; });
+    todays.forEach(function (e) {
+      out.push({ cls: 'event', icon: '', dot: eventColor(e), app: 'calendar', time: e.allDay ? 'All day' : fmtTime(e.start), text: e.title, whoHtml: e.who ? whoTag(e.who) : '' });
     });
+    if (!todays.length) out.push({ cls: 'muted-item', icon: '', text: 'Nothing else on today' });
 
-    // Calendar: rest of today, then tomorrow.
-    var calEvents = events.filter(function (e) { return !e.bin; }); // bins get their own reminder below
-    var todays = eventsOn(calEvents, now).filter(function (e) { return e.allDay || (e.end || e.start) >= now; });
-    if (todays.length) {
-      out.push({
-        cls: '', icon: '📅', app: 'calendar',
-        title: todays.length === 1 ? todays[0].title : todays.length + ' things on today',
-        sub: todays.slice(0, 4).map(function (e) { return (e.allDay ? 'All day' : fmtTime(e.start)) + ' ' + e.title; }).join(' · ')
-      });
-    }
-    var tom = eventsOn(calEvents, addDays(now, 1));
-    if (tom.length) {
-      out.push({
-        cls: '', icon: '🗓️', app: 'calendar', title: 'Tomorrow: ' + (tom.length === 1 ? tom[0].title : tom.length + ' events'),
-        sub: tom.slice(0, 4).map(function (e) { return (e.allDay ? 'All day' : fmtTime(e.start)) + ' ' + e.title; }).join(' · ')
-      });
-    }
+    out.push({ cls: 'dinner', icon: '🍽️', action: 'dinner', day: today, text: dinnerFor(today) ? 'Dinner: ' + dinnerFor(today).name : 'Dinner: tap to plan' });
 
-    // To-dos live on the people cards and groceries have a dock badge, so
-    // notifications are only for things that pop up.
+    var tom = eventsOn(cal, addDays(now, 1));
+    var tomDinner = dinnerFor(tomorrow);
+    if (tom.length || tomDinner) {
+      out.push({ cls: 'subhead', text: 'Tomorrow' });
+      tom.slice(0, 3).forEach(function (e) {
+        out.push({ cls: 'event small-item', dot: eventColor(e), app: 'calendar', time: e.allDay ? 'All day' : fmtTime(e.start), text: e.title });
+      });
+      if (tom.length > 3) out.push({ cls: 'muted-item', app: 'calendar', text: '+ ' + (tom.length - 3) + ' more' });
+    }
+    out.push({ cls: 'dinner small-item', icon: '🍽️', action: 'dinner', day: tomorrow, text: tomDinner ? 'Dinner tomorrow: ' + tomDinner.name : 'Plan tomorrow’s dinner' });
     return out;
   }
+
+  // ---- Meal plan (dinner for a given day) -------------------------------
+  function dinnerFor(day) { return Store.data.mealplan[day] || null; }
+  function planDinner(day) {
+    var current = dinnerFor(day);
+    var meals = Store.data.meals.slice().sort(function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; });
+    var chips = meals.length
+      ? '<label class="lbl">Pick a saved meal</label><div class="seg flex wrap meal-pick" data-name="meal">' + meals.map(function (m) {
+          return '<button class="opt" data-action="seg" data-value="' + m.id + '">' + esc(m.name) + '</button>';
+        }).join('') + '</div>' +
+        '<label class="chk"><input type="checkbox" name="addingr" checked> Add its ingredients to the shopping list</label>'
+      : '<p class="muted small">Tip: save meals with their ingredients under Groceries → Meals, then pick them here.</p>';
+    Modal.open('Dinner ' + (day === dayKey() ? 'today' : fmtDayShort(day).toLowerCase()),
+      chips +
+      '<label class="lbl">Or type it</label><input class="field" name="dinner" placeholder="e.g. Tacos" value="' + esc(current && !current.mealId ? current.name : '') + '">' +
+      (current ? '<button class="btn danger small" data-action="dinner-clear" data-day="' + day + '">Clear dinner</button>' : ''),
+      function () {
+        var typed = Modal.val('dinner'), id = Modal.seg('meal');
+        var meal = null;
+        for (var i = 0; i < meals.length; i++) if (meals[i].id === id) meal = meals[i];
+        if (!typed && !meal) return false;
+        if (meal && !typed) {
+          Store.data.mealplan[day] = { name: meal.name, mealId: meal.id };
+          var box = $('modal-root').querySelector('[name=addingr]');
+          if (box && box.checked) {
+            meal.ingredients.forEach(function (x) { Apps.groceries.add(x, meal.name); });
+            Store.save('groceries');
+            Toast.show('Added ' + meal.ingredients.length + ' ingredients to the shopping list');
+          }
+        } else Store.data.mealplan[day] = { name: typed, mealId: '' };
+        // Keep a week of history only.
+        var cutoff = dayKey(addDays(new Date(), -7));
+        Object.keys(Store.data.mealplan).forEach(function (k) { if (k < cutoff) delete Store.data.mealplan[k]; });
+        Store.save('mealplan');
+      }, 'Save');
+  }
+
+  // ---- Guest Wi-Fi QR -------------------------------------------------------
+  function wifiEscape(v) { return String(v).replace(/([\;,:"])/g, '\\$1'); }
+  function showWifi() {
+    var w = Store.data.settings.wifi;
+    if (!w.ssid) { openApp('settings'); return Toast.show('Add your guest Wi-Fi under Settings → Guest Wi-Fi'); }
+    var payload = 'WIFI:T:' + (w.security === 'nopass' ? 'nopass' : w.security) + ';S:' + wifiEscape(w.ssid) + ';' +
+      (w.security === 'nopass' ? '' : 'P:' + wifiEscape(w.password) + ';') + (w.hidden ? 'H:true;' : '') + ';';
+    var svg = '';
+    try {
+      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+      var qr = qrcode(0, 'M');
+      qr.addData(payload);
+      qr.make();
+      svg = qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+    } catch (e) { svg = '<p class="overdue">Couldn’t make the QR code.</p>'; }
+    Modal.info('Guest Wi-Fi',
+      '<div class="wifi-qr">' + svg + '</div>' +
+      '<p class="wifi-text">Point your phone’s camera at the code to join.</p>' +
+      '<div class="wifi-creds"><div><span class="muted">Network</span> <b>' + esc(w.ssid) + '</b></div>' +
+      (w.security === 'nopass' ? '' : '<div><span class="muted">Password</span> <b>' + esc(w.password) + '</b></div>') + '</div>');
+  }
+
+  // ---- Camera snap (quick look without leaving home) ---------------------
+  function cameraSnap() {
+    var cams = cameras();
+    if (!cams.length) { openApp('settings'); return Toast.show('Add a camera under Settings → Cameras'); }
+    Modal.info('Camera snap',
+      '<div class="snap-grid flex wrap">' + cams.map(function (c) {
+        return '<div class="snap"><div class="cam-inner">' + Apps.cameras.media(c) + '<div class="cam-name"><span>' + esc(c.name) + '</span></div></div></div>';
+      }).join('') + '</div>' +
+      '<button class="btn small" data-action="open" data-app="cameras" style="margin-top:10px">Open Cameras</button>',
+      function () { Apps.cameras.stop(); });
+    Apps.cameras.start($('modal-root'));
+  }
+
+  // ---- Home screen ----------------------------------------------------------
+  var HomeTodos = { filter: lsGet('househub.homeTodoFilter', 'all') };
 
   function renderHome() {
     $('title').textContent = Store.data.settings.title;
@@ -1602,47 +1700,57 @@
 
     $('weather').innerHTML = Weather.html();
 
-    // One card per person with their open to-dos (those marked for the home screen).
-    var todayK = dayKey(), MAX = 4;
-    $('progress').innerHTML = LISTS.map(function (l) {
-      var all = Store.data.todos.filter(function (t) { return !t.done && t.who === l[0]; });
-      var todos = all.filter(function (t) { return t.home !== false; }).sort(function (a, b) {
-        var da = a.due || '9999', db = b.due || '9999';
-        return da < db ? -1 : da > db ? 1 : (a.created || 0) - (b.created || 0);
-      });
-      var hidden = all.length - todos.length;
-      var h = '<div class="person grow">' +
-        '<div class="person-head flex between center" data-action="open" data-app="todo" data-who="' + l[0] + '">' +
-        '<span class="name">' + l[1] + '</span>' +
-        '<span class="muted small">' + (all.length ? all.length + ' to-do' + (all.length > 1 ? 's' : '') : '') + ' ›</span></div>' +
-        '<div class="person-todos">';
-      if (!todos.length) h += '<div class="pt-empty muted small">' + (hidden ? 'Nothing for the home screen' : 'No to-dos 🎉') + '</div>';
-      todos.slice(0, MAX).forEach(function (t) {
-        var late = t.due && t.due < todayK;
-        h += '<div class="pt flex center">' +
-          '<button class="pt-check" data-action="home-todo-done" data-id="' + t.id + '" aria-label="Done"></button>' +
-          '<div class="pt-text grow" data-action="open" data-app="todo" data-who="' + l[0] + '">' + esc(t.text) +
-          (t.due ? ' <span class="pt-due' + (late ? ' overdue' : '') + '">' + (late ? 'overdue' : fmtDayShort(t.due).toLowerCase()) + '</span>' : '') + '</div></div>';
-      });
-      if (todos.length > MAX) h += '<div class="pt-more small" data-action="open" data-app="todo" data-who="' + l[0] + '">+ ' + (todos.length - MAX) + ' more</div>';
-      h += '</div><button class="pt-add small" data-action="home-todo-add" data-who="' + l[0] + '">+ Add to-do</button></div>';
-      return h;
+    // Agenda & meals
+    $('agenda').innerHTML = agendaItems().map(function (n) {
+      if (n.cls === 'subhead') return '<div class="ag-sub">' + esc(n.text) + '</div>';
+      var act = n.action === 'dinner' ? ' data-action="dinner" data-day="' + n.day + '"' : n.app ? ' data-action="open" data-app="' + n.app + '"' : '';
+      return '<div class="ag-item flex center ' + n.cls + '"' + act + '>' +
+        (n.dot ? '<span class="ag-dot" style="background:' + esc(n.dot) + '"></span>' : '<span class="ag-icon">' + (n.icon || '•') + '</span>') +
+        '<div class="grow">' + (n.time ? '<span class="ag-time">' + n.time + '</span> ' : '') + (n.whoHtml || '') + esc(n.text) +
+        (n.sub ? '<div class="ag-subtext">' + esc(n.sub) + '</div>' : '') + '</div></div>';
     }).join('');
 
-    var list = notifications();
-    $('notifications').innerHTML = list.length ? list.map(function (n) {
-      return '<div class="notif flex center ' + n.cls + '"' + (n.app ? ' data-action="open" data-app="' + n.app + '"' + (n.who ? ' data-who="' + n.who + '"' : '') : '') + '>' +
-        '<div class="icon">' + n.icon + '</div><div class="body grow"><div class="title">' + esc(n.title) + '</div>' +
-        (n.sub || n.whoHtml ? '<div class="sub">' + (n.whoHtml || '') + esc(n.sub || '') + '</div>' : '') + '</div>' +
-        (n.tick ? '<button class="btn small" data-action="home-todo-done" data-id="' + n.tick + '">✓ Done</button>' : '') +
-        (n.dismiss ? '<button class="x" data-action="dismiss-note" data-id="' + n.dismiss + '">✕</button>' : '') + '</div>';
-    }).join('') : '<div class="empty-notif">All quiet – nothing needs attention 🌿</div>';
+    // To-dos (home-screen ones), filtered by person
+    var f = HomeTodos.filter, todayK = dayKey();
+    $('home-todo-tabs').innerHTML = [['all', 'All']].concat(LISTS).map(function (t) {
+      return '<button class="mtab' + (t[0] === f ? ' active' : '') + '" data-action="home-todo-filter" data-f="' + t[0] + '">' + t[1] + '</button>';
+    }).join('');
+    var todos = Store.data.todos.filter(function (t) { return !t.done && t.home !== false && (f === 'all' || t.who === f); }).sort(function (a, b) {
+      var da = a.due || '9999', db = b.due || '9999';
+      return da < db ? -1 : da > db ? 1 : (a.created || 0) - (b.created || 0);
+    });
+    var th = todos.length ? '' : '<div class="pt-empty muted">No to-dos here 🎉</div>';
+    todos.forEach(function (t) {
+      var late = t.due && t.due < todayK;
+      th += '<div class="pt flex center">' +
+        '<button class="pt-check" data-action="home-todo-done" data-id="' + t.id + '" aria-label="Done"></button>' +
+        '<div class="pt-text grow" data-action="home-todo-edit" data-id="' + t.id + '">' + esc(t.text) +
+        (t.due ? ' <span class="pt-due' + (late ? ' overdue' : '') + '">' + (late ? 'overdue' : fmtDayShort(t.due).toLowerCase()) + '</span>' : '') + '</div>' +
+        (f === 'all' ? whoTag(t.who) : '') + '</div>';
+    });
+    th += '<button class="pt-add" data-action="home-todo-add" data-who="' + (f === 'all' ? 'both' : f) + '">+ Add to-do</button>';
+    $('home-todos').innerHTML = th;
+
+    // Pinned notes
+    var notes = Store.data.notes;
+    $('notes').innerHTML = notes.length ? notes.map(function (n) {
+      return '<div class="note flex">' +
+        '<span class="note-pin">📌</span><div class="grow"><div class="note-text">“' + esc(n.text) + '”</div>' +
+        '<div class="note-meta muted small">' + (WHO[n.who] ? WHO[n.who].label + ' · ' : '') + fmtDayShort(dayKey(new Date(n.at))) + '</div></div>' +
+        '<button class="x" data-action="dismiss-note" data-id="' + n.id + '" aria-label="Unpin">✕</button></div>';
+    }).join('') : '<div class="pt-empty muted">No notes. Tap “+ Note” to pin one for everyone.</div>';
+
+    // Quick utilities
+    var w = Store.data.settings.wifi;
+    $('utilities').innerHTML =
+      '<button class="util" data-action="util-wifi"><span class="util-icon">📶</span><span class="util-label">Guest Wi-Fi QR</span>' +
+      '<span class="util-sub muted small">' + (w.ssid ? esc(w.ssid) : 'Set up in Settings') + '</span></button>' +
+      '<button class="util" data-action="util-snap"><span class="util-icon">📷</span><span class="util-label">Camera snap</span>' +
+      '<span class="util-sub muted small">' + (cameras().length ? cameras().length + ' camera' + (cameras().length > 1 ? 's' : '') : 'Set up in Settings') + '</span></button>';
 
     // Badges on dock buttons.
-    var today = dayKey();
     setBadge('calendar', eventsOn(allEvents(), new Date()).length);
     setBadge('groceries', groc().items.filter(function (i) { return !i.done; }).length);
-    setBadge('todo', Store.data.todos.filter(function (t) { return !t.done && t.due && t.due <= today; }).length);
   }
   function setBadge(app, n) {
     var b = $('badge-' + app);
@@ -1709,7 +1817,7 @@
       return;
     }
     if (action === 'add-note') {
-      return Modal.open('Leave a note',
+      return Modal.open('Pin a note',
         '<textarea class="field" name="text" rows="3" placeholder="e.g. Parcel arriving today, please sign"></textarea>' +
         '<label class="lbl">From</label>' + segHtml('who', [['jess', 'Jess'], ['graham', 'Graham'], ['both', 'Us']], 'both'),
         function () {
@@ -1719,6 +1827,21 @@
           Store.save('notes');
         }, 'Post');
     }
+    if (action === 'home-todo-filter') {
+      HomeTodos.filter = el.getAttribute('data-f');
+      lsSet('househub.homeTodoFilter', HomeTodos.filter);
+      return renderHome();
+    }
+    if (action === 'home-todo-edit') { var te = Apps.todo.find(el.getAttribute('data-id')); if (te) Apps.todo.editor(te); return; }
+    if (action === 'dinner') return planDinner(el.getAttribute('data-day'));
+    if (action === 'dinner-clear') {
+      delete Store.data.mealplan[el.getAttribute('data-day')];
+      Store.save('mealplan');
+      Modal.close();
+      return rerender();
+    }
+    if (action === 'util-wifi') return showWifi();
+    if (action === 'util-snap') return cameraSnap();
     if (action === 'home-todo-add') {
       return Apps.todo.editor({ text: '', who: el.getAttribute('data-who') });
     }
@@ -1788,6 +1911,7 @@
     var idle = Date.now() - lastTouch;
     var focused = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
     if (current && idle > IDLE_MS && !focused) goHome();
+    if (!current && idle > IDLE_MS && !focused && Modal.onClose) Modal.close(); // e.g. a camera snap left open
     var h = new Date().getHours();
     var night = h >= NIGHT_START || h < NIGHT_END;
     if (night && idle > 60000) $('dimmer').className = '';

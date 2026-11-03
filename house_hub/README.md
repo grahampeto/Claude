@@ -14,9 +14,16 @@ and big buttons along the bottom for the sub-apps:
 | ✅ **To-Do** | Tasks with an owner (Jess / Graham / Together), an optional due date, and a switch for whether they show on the home screen or only in the list. |
 | 📹 **Cameras** | Live LSC garage camera and Ring doorbell snapshots, both through the cloud, so nothing extra runs at home. Doorbell presses show on the home screen. |
 
-**Home screen:** the clock is at the top left. The **live weather** is in the middle; tap it for a **14-day forecast** with wind, humidity, rain, UV, sunrise/sunset and the next 24 hours (Open-Meteo, free, no account; set the town in ⚙️ Settings). Below that is a card each for **Jess, Graham and Together** with their open **to-dos**, which you can tick off or add right there. To-dos marked *Only in the list* stay off the cards.
+**Home screen (tablet layout):**
+- **Header:** clock and date, the live weather in the middle (tap it for a 14-day forecast), and the title with ⚙️.
+- **Today's agenda & meals:** doorbell rings, low battery, bin days, today's and tomorrow's events, and **dinner today/tomorrow**. Tap a dinner to pick a saved meal (it can add the ingredients to the shopping list) or type one.
+- **To-dos:** All / Jess / Graham / Together tabs. Tick to finish, tap to edit, *+ Add to-do*. *To-dos ›* opens the full list, including list-only and done items.
+- **Pinned family notes:** notes for everyone. *+ Note* to pin one, ✕ to unpin.
+- **Quick utilities:** a **Guest Wi-Fi QR** code (set the network in ⚙️ Settings) and a **Camera snap** pop-up.
+- **Dock:** Calendar, Groceries, Cameras and Settings.
 
-**Notifications** are kept for things that pop up: doorbell rings, today's and tomorrow's calendar events, bin days, notes you leave each other (**+ Leave a note**), and a low doorbell battery.
+On phones the panels stack and the page scrolls.
+
 
 **Wall display mode** is on by default on tablets and off on phones. You can change it
 for each device in ⚙️ Settings. With it on, the app goes back to the home screen after

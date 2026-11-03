@@ -17,37 +17,46 @@
 <body>
 
 <div id="home" class="screen flex col">
-  <div class="home-top flex between">
+  <div class="home-top flex between center">
     <div class="top-left">
       <div class="clock" id="clock">--:--</div>
       <div class="date" id="date"></div>
     </div>
-    <div class="weather grow" id="weather" data-action="open" data-app="weather"></div>
-    <div class="home-title">
-      <div class="flex center" style="-webkit-box-pack:end;-webkit-justify-content:flex-end;justify-content:flex-end">
-        <h1 id="title">Our Home</h1>
-        <button class="gear" data-action="open" data-app="settings" aria-label="Settings">⚙️</button>
-      </div>
-      <div class="sync" id="sync"></div>
+    <div class="weather" id="weather" data-action="open" data-app="weather"></div>
+    <div class="home-title flex center">
+      <div><h1 id="title">Our Home</h1><div class="sync" id="sync"></div></div>
+      <button class="gear" data-action="open" data-app="settings" aria-label="Settings">⚙️</button>
     </div>
   </div>
 
-  <div class="home-main grow">
-    <div class="section-label">To-dos</div>
-    <div class="people flex" id="progress"></div>
-
-    <div class="flex between center">
-      <div class="section-label">Notifications</div>
-      <button class="btn small" data-action="add-note">+ Leave a note</button>
+  <div class="home-grid grow flex col">
+    <div class="grid-row flex">
+      <section class="panel-card p-agenda flex col">
+        <div class="pc-title">Today’s agenda &amp; meals</div>
+        <div class="pc-body grow" id="agenda"></div>
+      </section>
+      <section class="panel-card p-todos flex col">
+        <div class="pc-title flex between center"><span data-action="open" data-app="todo">To-dos ›</span><div class="mini-tabs flex" id="home-todo-tabs"></div></div>
+        <div class="pc-body grow" id="home-todos"></div>
+      </section>
     </div>
-    <div class="notifications" id="notifications"></div>
+    <div class="grid-row flex">
+      <section class="panel-card p-notes flex col">
+        <div class="pc-title flex between center"><span>Pinned family notes</span><button class="btn small" data-action="add-note">+ Note</button></div>
+        <div class="pc-body grow" id="notes"></div>
+      </section>
+      <section class="panel-card p-utils flex col">
+        <div class="pc-title">Quick utilities</div>
+        <div class="pc-body grow utils flex" id="utilities"></div>
+      </section>
+    </div>
   </div>
 
   <div class="dock flex">
     <button class="app-btn" data-action="open" data-app="calendar"><div class="tile img"><img src="icons/calendar.svg" alt=""><span class="badge hidden" id="badge-calendar"></span></div><div class="label">Calendar</div></button>
     <button class="app-btn" data-action="open" data-app="groceries"><div class="tile img"><img src="icons/groceries.svg" alt=""><span class="badge hidden" id="badge-groceries"></span></div><div class="label">Groceries</div></button>
-    <button class="app-btn" data-action="open" data-app="todo"><div class="tile img"><img src="icons/todo.svg" alt=""><span class="badge hidden" id="badge-todo"></span></div><div class="label">To-Do</div></button>
     <button class="app-btn" data-action="open" data-app="cameras"><div class="tile img"><img src="icons/cameras.svg" alt=""></div><div class="label">Cameras</div></button>
+    <button class="app-btn" data-action="open" data-app="settings"><div class="tile img"><img src="icons/settings.svg" alt=""></div><div class="label">Settings</div></button>
   </div>
 </div>
 
@@ -64,6 +73,7 @@
 <div id="dimmer" class="hidden"><div class="clock" id="dim-clock"></div></div>
 
 <script src="ics.js"></script>
+<script src="qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
