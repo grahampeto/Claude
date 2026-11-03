@@ -1706,6 +1706,12 @@
       }, 'Save');
   }
 
+  // Moving a <video> in the page can pause it; nudge it to keep playing.
+  function playAll(root) {
+    var vids = root.querySelectorAll('video');
+    for (var i = 0; i < vids.length; i++) { try { var pr = vids[i].play(); if (pr && pr.catch) pr.catch(function () {}); } catch (e) { /* ignore */ } }
+  }
+
   // ---- Live cameras pop-up (doorbell + garage side by side) --------------
   function cameraLive() {
     var cams = cameras();
@@ -1717,8 +1723,8 @@
           '<div class="lp-icon">' + placeholder.icon + '</div><div class="lp-title">' + placeholder.title + '</div>' +
           '<div class="muted small">' + placeholder.sub + '</div></div></div>';
       }
-      return '<div class="live-tile"><div class="cam-inner">' + Apps.cameras.media(c) +
-        '<div class="cam-name"><span>' + esc(c.name) + '</span></div></div></div>';
+      return '<div class="live-tile"><div class="cam-inner" data-action="live-full">' + Apps.cameras.media(c) +
+        '<div class="cam-name flex between"><span>' + esc(c.name) + '</span><span>⤢</span></div></div></div>';
     }
     Modal.info('Cameras',
       '<div class="live-grid flex">' +
@@ -1886,6 +1892,32 @@
         Toast.show('Done: ' + t.text, function () { t.done = false; t.doneAt = null; Store.save('todos'); });
       });
       return Store.save('todos');
+    }
+    // Full screen from the cameras pop-up: move the playing tile into an
+    // overlay (no new stream, so Ring doesn't have to reconnect) and back.
+    if (action === 'live-full') {
+      if (document.querySelector('.live-overlay')) return;
+      var tileBox = el.parentNode, ov = document.createElement('div');
+      ov.className = 'cam-full live-overlay';
+      ov.innerHTML = '<button class="live-close" data-action="live-full-close">✕ Close</button>';
+      ov.insertBefore(el, ov.firstChild);
+      el.removeAttribute('data-action');
+      ov._home = tileBox;
+      document.body.appendChild(ov);
+      playAll(el);
+      return;
+    }
+    if (action === 'live-full-close') {
+      var ovl = document.querySelector('.live-overlay');
+      if (!ovl) return;
+      var inner = ovl.querySelector('.cam-inner');
+      if (inner && ovl._home && ovl._home.parentNode) {
+        inner.setAttribute('data-action', 'live-full');
+        ovl._home.appendChild(inner);
+        playAll(inner);
+      }
+      ovl.parentNode.removeChild(ovl);
+      return;
     }
     if (action === 'ring-sound') {
       e.stopPropagation();

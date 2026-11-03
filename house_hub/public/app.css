@@ -578,3 +578,15 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
 .cam-inner .cam-name { z-index: 2; }
 .util-live { font-size: 13px; color: #ff6b6b; font-weight: 700; margin-top: 2px; }
 @media (max-width: 600px) { .live-grid { display: block; } .live-tile { width: 100%; padding: 0 6px 10px; } }
+
+/* full-screen live camera (from the cameras pop-up) */
+.live-overlay { z-index: 48; background: #000; }
+.live-overlay .cam-inner { width: 100%; height: 100%; border-radius: 0; }
+.live-overlay .cam-media { width: 100%; height: 100%; min-height: 0; -o-object-fit: contain; object-fit: contain; }
+.live-overlay .cam-name { padding: 16px 20px; font-size: 20px; }
+.live-overlay .cam-name span:last-child { display: none; }
+.live-overlay .ring-sound { top: 20px; right: auto; left: 20px; top: auto; bottom: 64px; font-size: 22px; padding: 10px 14px; }
+.live-close { position: absolute; top: 18px; right: 18px; z-index: 5; background: rgba(20,24,32,.85); color: #fff; font-size: 20px; font-weight: 700;
+  padding: 14px 22px; border-radius: 28px; border: 1px solid rgba(255,255,255,.25); }
+.live-close:active { background: #4f8cff; }
+.live-tile .cam-inner[data-action] { cursor: pointer; }
