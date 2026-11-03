@@ -163,7 +163,7 @@
       setInterval(function () { self.flush(); }, 15000);
       this.pullCalendar();
       setInterval(function () { self.pullCalendar(); }, 10 * 60000);
-      setInterval(function () { self.pullGoogle(); }, 5 * 60000);
+      setInterval(function () { self.pullGoogle(); }, 2 * 60000);
       this.pullRing();
       setInterval(function () { self.pullRing(); }, 2 * 60000);
     },
@@ -345,7 +345,7 @@
         if (err && /not set up/.test(err.message)) { self.google = { calendars: [], events: [], errors: [], status: 'unavailable' }; }
         else if (err) { self.google.status = 'error'; self.google.errors = [err.message]; }
         else {
-          self.google = { calendars: res.calendars || [], events: res.events || [], errors: res.errors || [], status: 'ok' };
+          self.google = { calendars: res.calendars || [], events: res.events || [], errors: res.errors || [], status: 'ok', at: Date.now() };
           lsSet('househub.google', self.google);
         }
         self.emit();
@@ -466,8 +466,11 @@
     title: 'Calendar',
     month: null,
     selected: null,
-    enter: function () { var t = new Date(); this.month = new Date(t.getFullYear(), t.getMonth(), 1); this.selected = dayKey(t); },
-    headerActions: '<button class="btn primary small" data-action="cal-add">+ Event</button>',
+    enter: function () {
+      var t = new Date(); this.month = new Date(t.getFullYear(), t.getMonth(), 1); this.selected = dayKey(t);
+      Store.pullGoogle(); // always show the latest from Google when the calendar opens
+    },
+    headerActions: '<button class="btn small" data-action="cal-refresh" style="margin-right:8px">↻</button><button class="btn primary small" data-action="cal-add">+ Event</button>',
     shell: function () { return '<div class="cal-wrap flex"><div class="cal-month" id="cal-month"></div><div class="cal-day" id="cal-day"></div></div>'; },
     render: function () {
       var events = allEvents();
@@ -495,7 +498,11 @@
       h += '</div>';
       var problems = (Store.calendar.errors || []).concat(Store.googleOn() ? Store.google.errors : []);
       if (problems.length) h += '<p class="small overdue">Calendar problem: ' + esc(problems.join('; ')) + '</p>';
-      if (Store.googleOn() && Store.google.status === 'ok') h += '<p class="small muted">✓ Synced with Google Calendar</p>';
+      if (Store.googleOn() && Store.google.status === 'ok') {
+        h += '<p class="small muted">✓ Google: ' + esc(Store.google.calendars.map(function (c) { return c.name; }).join(', ')) +
+          (Store.google.at ? ' · synced ' + fmtTime(new Date(Store.google.at)) : '') + ' · ' + Store.google.events.length + ' events. ' +
+          'Only these calendars are shown – add more to GOOGLE_CALENDAR_IDS on the worker.</p>';
+      }
       $('cal-month').innerHTML = h;
 
       var sel = parseDay(this.selected), dayEvs = eventsOn(events, sel);
@@ -516,6 +523,7 @@
       'cal-prev': function () { var m = Apps.calendar.month; Apps.calendar.month = new Date(m.getFullYear(), m.getMonth() - 1, 1); },
       'cal-next': function () { var m = Apps.calendar.month; Apps.calendar.month = new Date(m.getFullYear(), m.getMonth() + 1, 1); },
       'cal-today': function () { Apps.calendar.enter(); },
+      'cal-refresh': function () { Store.pullGoogle(); Store.pullCalendar(); Toast.show('Checking Google Calendar…'); },
       'cal-select': function (el) { Apps.calendar.selected = el.getAttribute('data-day'); },
       'cal-del': function (el) {
         var id = el.getAttribute('data-id'), gcal = el.getAttribute('data-gcal');
@@ -1624,7 +1632,9 @@
 
   // Phones drop the live connection when the browser sleeps: reconnect on wake.
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && Store.sync && !Store.online) Store.connect();
+    if (document.hidden) return;
+    if (Store.sync && !Store.online) Store.connect();
+    Store.pullGoogle(); // phones: catch up after being in the background
   }, false);
 
   // Offline support / installable app (not available on very old iOS – that's fine).
