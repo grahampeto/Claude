@@ -561,3 +561,20 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
 .pc-body, .ug-list, .tcol-list { scrollbar-width: none; -ms-overflow-style: none; }
 .pc-body::-webkit-scrollbar, .ug-list::-webkit-scrollbar, .tcol-list::-webkit-scrollbar { display: none; width: 0; height: 0; }
 @media (max-width: 600px) { #home { padding-bottom: 12px; } .home-title { min-width: 0; } }
+
+/* live cameras pop-up */
+.modal.wide { width: 980px; max-width: 96%; }
+.live-grid { margin: 0 -6px; }
+.live-tile { width: 50%; padding: 0 6px; }
+.live-tile .cam-inner { min-height: 260px; }
+.live-tile .cam-media { min-height: 260px; height: 100%; }
+.live-placeholder { min-height: 260px; background: #11161f; border: 2px dashed #2f3a50; text-align: center; padding: 20px;
+  -webkit-box-pack: center; -webkit-justify-content: center; justify-content: center; }
+.lp-icon { font-size: 44px; }
+.lp-title { font-size: 19px; font-weight: 700; margin: 8px 0 4px; }
+.ring-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; }
+.ring-sound { position: absolute; top: 12px; right: 12px; font-size: 18px; background: rgba(0,0,0,.55); z-index: 2; }
+.cam-age { z-index: 2; }
+.cam-inner .cam-name { z-index: 2; }
+.util-live { font-size: 13px; color: #ff6b6b; font-weight: 700; margin-top: 2px; }
+@media (max-width: 600px) { .live-grid { display: block; } .live-tile { width: 100%; padding: 0 6px 10px; } }

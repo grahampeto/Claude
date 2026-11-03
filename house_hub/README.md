@@ -19,7 +19,7 @@ and big buttons along the bottom for the sub-apps:
 - **Today's agenda:** everything in today's calendar (finished events are dimmed), plus doorbell-ring, low-battery and bin-day alerts. Tap the panel to open the calendar.
 - **To-dos:** a colour-coded column each for **Jess** and **Graham** (to-dos marked for the home screen). Tick to finish, tap to edit, *+ Add to-do*. Tap a name for the full list, including Together, list-only and done items.
 - **Pinned family notes:** notes for everyone. *+ Note* to pin one, ✕ to unpin.
-- **Quick utilities:** the **grocery list** (swipe to scroll, tick to remove, add items inline; tap its heading for the full Groceries screen) and a **Camera snap** pop-up (with a button to the Cameras screen).
+- **Quick utilities:** the **grocery list** (swipe to scroll, tick to remove, add items inline; tap its heading for the full Groceries screen) and **📷 Cameras**, which opens the doorbell (live) and garage camera side by side.
 
 There's no dock: Calendar, Groceries, Cameras and Settings are all reached from the panels and ⚙️.
 
@@ -157,7 +157,7 @@ The reminders appear in the hub; they aren't phone push notifications.
 | Camera | What you get in the hub | How |
 |---|---|---|
 | **LSC Outdoor Dual Band** (garage) | **Live video**, at home and away | The worker asks Tuya's official cloud API for a short-lived live stream. LSC cameras are Tuya devices. |
-| **Ring doorbell** | The **latest snapshot** (refreshed every 30s), a **"Someone rang the doorbell"** notification on the home screen, a low-battery warning, and a **Live view** button that opens the Ring app | Ring has no official API. The worker uses the same unofficial one Home Assistant uses. |
+| **Ring doorbell** | **Live view** (video and optional sound), with the latest snapshot as an instant preview and fallback, a **"Someone rang the doorbell"** alert on the home screen, and a low-battery warning | Ring has no official API. The worker uses the same unofficial one Home Assistant uses. For live view it only swaps the WebRTC connection details; the video comes straight from Ring to your device. |
 
 Streams only run while the Cameras screen is open.
 
@@ -193,7 +193,7 @@ Notes:
 3. **In the Ring app,** turn on **Snapshot Capture** for the doorbell (Device → Settings). Otherwise battery doorbells only take a new picture when there's motion.
 
 Notes:
-- **"Live view"** opens the Ring app. On Android it opens straight away. On the iPad and iPhones it goes via the App Store page, where you tap **Open**. That only works if the Ring app supports your iOS version.
+- **Live view** starts when you tap **📷 Cameras** on the home screen (doorbell and garage side by side) or open the Cameras screen. It stops when you close it, or after a few idle minutes on the wall iPad, to save the doorbell battery. Tap 🔇 for sound. If Ring refuses, the tile shows the latest snapshot and says why. It needs iOS 15 or newer (WebRTC) and the latest worker code.
 - Doorbell notifications can show **up to 2 minutes late**, because the hub checks Ring every 2 minutes.
 - Ring lists the hub as **House Hub** under *Control Center → Authorized Client Devices*. You can remove it there at any time.
 - Because this uses Ring's unofficial API, Ring could change or block it without warning. If it stops working, log in again from Settings.

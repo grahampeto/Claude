@@ -90,3 +90,32 @@ test('Ring: 2FA login, rotating refresh token, devices, snapshot fallback, ?toke
     assert.strictEqual(bad.status, 401);
   } finally { global.fetch = real; }
 });
+
+test('Ring live view: offer goes to Ring, answer comes back, end closes it', async function () {
+  var worker = (await import('../house-hub.worker.js?live')).default;
+  var env = { HUB_TOKEN: 'tok', HUB_KV: kv() };
+  await env.HUB_KV.put('ring_refresh_token', 'r0');
+  var real = global.fetch, calls = [];
+  global.fetch = async function (u, init) {
+    u = String(u); init = init || {};
+    if (u === 'https://oauth.ring.com/oauth/token') return Response.json({ access_token: 'a', refresh_token: 'r1', expires_in: 3600 });
+    calls.push({ u: u, body: init.body ? JSON.parse(init.body) : null, auth: init.headers.Authorization });
+    if (u.endsWith('/liveview/start')) return Response.json({ sdp: 'v=0\r\nanswer' });
+    if (u.endsWith('/liveview/end')) return new Response(null, { status: 204 });
+    throw new Error('unexpected ' + u);
+  };
+  try {
+    var r = await worker.fetch(req('/ring/live/start', { method: 'POST', body: JSON.stringify({ deviceId: '42', sdp: 'v=0\r\noffer' }) }), env);
+    var j = await r.json();
+    assert.strictEqual(r.status, 200, JSON.stringify(j));
+    assert.strictEqual(j.sdp, 'v=0\r\nanswer');
+    assert.ok(/^[0-9a-f-]{36}$/.test(j.sessionId));
+    assert.deepStrictEqual(calls[0].body, { session_id: j.sessionId, device_id: 42, sdp: 'v=0\r\noffer', protocol: 'webrtc' });
+    assert.strictEqual(calls[0].auth, 'Bearer a');
+    var e = await worker.fetch(req('/ring/live/end', { method: 'POST', body: JSON.stringify({ sessionId: j.sessionId }) }), env);
+    assert.strictEqual(e.status, 200);
+    assert.deepStrictEqual(calls[1].body, { session_id: j.sessionId });
+    var bad = await worker.fetch(req('/ring/live/start', { method: 'POST', body: JSON.stringify({ deviceId: 'x', sdp: 'v=0' }) }), env);
+    assert.strictEqual(bad.status, 400);
+  } finally { global.fetch = real; }
+});

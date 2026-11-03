@@ -13,7 +13,9 @@
 //     Asks Tuya's official cloud API for a short-lived live HLS stream link.
 //
 //  4. Ring doorbell:         /ring/...
-//     Latest snapshot + recent dings/motion, via Ring's unofficial API
+//     Latest snapshot, recent dings/motion and LIVE VIEW (WebRTC: the worker
+//     only swaps the connection details; video flows straight from Ring's
+//     servers to the browser), via Ring's unofficial API
 //     (the same one Home Assistant uses). Ring can change it at any time.
 //
 //  5. Bin collection:        /afval?postcode=1234AB&number=12
@@ -423,6 +425,37 @@ async function ringSnapshot(env, id) {
   return new Response(res.body, { headers: { ...CORS, 'Content-Type': res.headers.get('Content-Type') || 'image/jpeg', 'Cache-Control': 'no-store' } });
 }
 
+// Live view: the browser sends a WebRTC offer, Ring answers. Same calls the
+// Ring web dashboard / ring-client-api's SimpleWebRtcSession use.
+const RING_LIVE = 'https://api.ring.com/integrations/v1/liveview';
+
+async function ringLiveStart(env, request) {
+  const b = await request.json();
+  if (!/^\d+$/.test(String(b.deviceId || ''))) return json({ error: 'bad device id' }, 400);
+  if (typeof b.sdp !== 'string' || b.sdp.indexOf('v=0') !== 0) return json({ error: 'bad offer' }, 400);
+  const sessionId = crypto.randomUUID();
+  let res;
+  try {
+    res = await ringFetch(env, RING_LIVE + '/start', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, device_id: Number(b.deviceId), sdp: b.sdp, protocol: 'webrtc' }),
+    });
+  } catch (e) {
+    throw new Error('Ring refused live view (' + e.message + ')');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!data.sdp) throw new Error('Ring didn\u2019t answer the live view request');
+  return json({ sessionId, sdp: data.sdp });
+}
+
+async function ringLiveEnd(env, request) {
+  const b = await request.json().catch(() => ({}));
+  if (b.sessionId) {
+    await ringFetch(env, RING_LIVE + '/end', { method: 'POST', body: JSON.stringify({ session_id: b.sessionId }) }).catch(() => {});
+  }
+  return json({ ok: true });
+}
+
 // ---------------------------------------------------------------- Bin collection (Mijn Afvalwijzer)
 // The public app key the Mijn Afvalwijzer website/app uses (also shipped in
 // Home Assistant's afvalwijzer integration). Override with AFVALWIJZER_APIKEY.
@@ -505,6 +538,8 @@ export default {
         if (!env.HUB_KV) return json({ error: 'Ring needs the HUB_KV binding on the worker' }, 501);
         if (p === '/ring/login' && request.method === 'POST') return await ringLogin(env, request);
         if (p === '/ring/devices' && request.method === 'GET') return await ringDevices(env);
+        if (p === '/ring/live/start' && request.method === 'POST') return await ringLiveStart(env, request);
+        if (p === '/ring/live/end' && request.method === 'POST') return await ringLiveEnd(env, request);
         const m = /^\/ring\/snapshot\/([^/]+)$/.exec(p);
         if (m && request.method === 'GET') return await ringSnapshot(env, decodeURIComponent(m[1]));
       }

@@ -458,9 +458,9 @@
       if (first) setTimeout(function () { first.focus(); }, 50);
     },
     // A pop-up with just a Close button (QR code, camera snap).
-    info: function (title, html, onClose) {
+    info: function (title, html, onClose, cls) {
       $('modal-root').innerHTML =
-        '<div class="modal-bg" data-action="modal-bg"><div class="modal">' +
+        '<div class="modal-bg" data-action="modal-bg"><div class="modal' + (cls ? ' ' + cls : '') + '">' +
         '<h3>' + esc(title) + '</h3>' + html +
         '<div class="modal-actions flex"><button class="btn primary" data-action="modal-cancel">Close</button></div>' +
         '</div></div>';
@@ -1128,6 +1128,87 @@
     for (var i = 0; i < cams.length; i++) if (/^http:/i.test(cams[i].url)) return cams[i].server || cams[i].url.replace(/^(http:\/\/[^\/]+).*$/i, '$1');
     return '';
   }
+  // Ring live view: the browser makes a WebRTC offer, the worker passes it
+  // to Ring and returns Ring's answer; video then flows straight from Ring.
+  var RingLive = {
+    sessions: [],
+    supported: function () { return !!(window.RTCPeerConnection && window.Promise && window.MediaStream); },
+    label: function (video, text, live) {
+      var age = video.parentNode && video.parentNode.querySelector('.cam-age');
+      if (!age) return;
+      age.textContent = text;
+      if (live) age.setAttribute('data-live', '1'); else age.removeAttribute('data-live');
+    },
+    fail: function (sess, why) {
+      if (sess.done) return;
+      this.end(sess);
+      var age = sess.video.parentNode && sess.video.parentNode.querySelector('.cam-age');
+      if (age) age.setAttribute('data-failed', '1');
+      this.label(sess.video, 'Live view unavailable – showing snapshot' + (why ? ' (' + why + ')' : ''));
+      sess.video.className = 'cam-media ring-video hidden';
+    },
+    start: function (video) {
+      var self = this;
+      if (!this.supported()) { this.label(video, 'Snapshot (live view needs a newer browser)'); return; }
+      var sess = { video: video, deviceId: video.getAttribute('data-ring-live'), done: false, sessionId: null };
+      this.sessions.push(sess);
+      var pc = sess.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      try {
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+      } catch (e) { return this.fail(sess, 'unsupported'); }
+      pc.ontrack = function (ev) {
+        var stream = ev.streams && ev.streams[0];
+        if (!stream) { stream = video.srcObject || new MediaStream(); stream.addTrack(ev.track); }
+        if (video.srcObject !== stream) video.srcObject = stream;
+        var pr = video.play(); if (pr && pr.catch) pr.catch(function () {});
+      };
+      video.onplaying = function () {
+        if (sess.done) return;
+        clearTimeout(sess.timer);
+        video.className = 'cam-media ring-video';
+        var snd = video.parentNode && video.parentNode.querySelector('.ring-sound');
+        if (snd) snd.className = 'btn small ring-sound';
+        self.label(video, '● Live', true);
+      };
+      pc.oniceconnectionstatechange = function () {
+        var st = pc.iceConnectionState;
+        if (st === 'failed') self.fail(sess, 'connection failed');
+        if (st === 'disconnected' && video.className.indexOf('hidden') < 0) self.label(video, 'Reconnecting…');
+        if (st === 'connected' && video.className.indexOf('hidden') < 0) self.label(video, '● Live', true);
+      };
+      sess.timer = setTimeout(function () { self.fail(sess, 'timed out'); }, 25000);
+      pc.createOffer().then(function (offer) { return pc.setLocalDescription(offer); }).then(function () {
+        // Ring needs every ICE candidate in the offer (no trickle), so wait for gathering.
+        return new Promise(function (resolve) {
+          if (pc.iceGatheringState === 'complete') return resolve();
+          var t = setTimeout(resolve, 3000);
+          pc.onicegatheringstatechange = function () { if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); } };
+        });
+      }).then(function () {
+        if (sess.done) return;
+        Store.googleCall('POST', '/ring/live/start', { deviceId: sess.deviceId, sdp: pc.localDescription.sdp }, function (err, res) {
+          if (sess.done) { if (res && res.sessionId) Store.googleCall('POST', '/ring/live/end', { sessionId: res.sessionId }, function () {}); return; }
+          if (err || !res || !res.sdp) return self.fail(sess, err ? err.message : 'no answer');
+          sess.sessionId = res.sessionId;
+          pc.setRemoteDescription({ type: 'answer', sdp: res.sdp })['catch'](function () { self.fail(sess, 'bad answer'); });
+        });
+      })['catch'](function () { self.fail(sess, 'offer failed'); });
+    },
+    end: function (sess) {
+      if (sess.done) return;
+      sess.done = true;
+      clearTimeout(sess.timer);
+      try { sess.pc.close(); } catch (e) { /* already closed */ }
+      try { sess.video.pause(); sess.video.srcObject = null; } catch (e) { /* ignore */ }
+      if (sess.sessionId) Store.googleCall('POST', '/ring/live/end', { sessionId: sess.sessionId }, function () {});
+    },
+    stopAll: function () {
+      for (var i = 0; i < this.sessions.length; i++) this.end(this.sessions[i]);
+      this.sessions = [];
+    }
+  };
+
   // Streams only run while this screen is open (saves Wi-Fi and Ring battery).
   Apps.cameras = {
     title: 'Cameras',
@@ -1156,9 +1237,11 @@
       var u = esc(c.url);
       if (c.type === 'tuya') return '<video class="cam-media" data-cam="' + c.id + '" data-tuya="' + esc(c.deviceId) + '" autoplay muted playsinline webkit-playsinline></video>';
       if (c.type === 'ring') {
-        return '<img class="cam-media" data-cam="' + c.id + '" data-src="' + u + '" alt="">' +
-          '<a class="btn primary small ring-live" data-action="ext-link" href="' + esc(ringAppLink()) + '" target="_blank">▶ Live view in Ring app</a>' +
-          '<div class="cam-age" data-age="' + c.id + '">Latest snapshot</div>';
+        // Snapshot first (instant, and the fallback); live video replaces it once it plays.
+        return '<img class="cam-media ring-snap" data-cam="' + c.id + '" data-src="' + u + '" alt="">' +
+          '<video class="cam-media ring-video hidden" data-ring-live="' + esc(c.deviceId) + '" autoplay muted playsinline webkit-playsinline></video>' +
+          '<div class="cam-age" data-age="' + c.id + '">Connecting live…</div>' +
+          '<button class="btn small ring-sound hidden" data-action="ring-sound" aria-label="Sound">🔇</button>';
       }
       if (c.type === 'hls') return '<video class="cam-media" data-cam="' + c.id + '" src="' + u + '" autoplay muted playsinline webkit-playsinline></video>';
       if (c.type === 'iframe') return '<iframe class="cam-media" data-cam="' + c.id + '" src="' + u + '" frameborder="0" style="height:' + (full ? '100%' : '300px') + '"></iframe>';
@@ -1176,6 +1259,9 @@
         e.textContent = text;
         el.parentNode.appendChild(e);
       }
+      // Ring: live view over WebRTC (falls back to the refreshing snapshot).
+      var rings = root.querySelectorAll('video[data-ring-live]');
+      for (var rv = 0; rv < rings.length; rv++) RingLive.start(rings[rv]);
       // Tuya/LSC: ask the worker for a fresh live-stream link (they expire).
       var vids = root.querySelectorAll('video[data-tuya]');
       for (var v = 0; v < vids.length; v++) (function (video) {
@@ -1201,7 +1287,7 @@
           img.parentNode.appendChild(e);
         };
         var age = root.querySelector('[data-age="' + img.getAttribute('data-cam') + '"]');
-        function loaded() { if (age) age.textContent = 'Snapshot checked ' + fmtTime(new Date()); }
+        function loaded() { if (age && !age.getAttribute('data-live')) age.textContent = (cam && cam.type === 'ring' ? 'Snapshot ' : 'Snapshot checked ') + fmtTime(new Date()) + (cam && cam.type === 'ring' && age.getAttribute('data-failed') ? ' · live view unavailable' : ''); }
         img.onload = loaded;
         img.src = bust();
         if (cam && (cam.type === 'snapshot' || cam.type === 'ring')) {
@@ -1214,6 +1300,7 @@
       })(imgs[i]);
     },
     stop: function () {
+      RingLive.stopAll();
       this.timers.forEach(clearInterval);
       this.timers = [];
       // Blanking the src closes MJPEG connections; pausing stops HLS.
@@ -1619,16 +1706,28 @@
       }, 'Save');
   }
 
-  // ---- Camera snap (quick look without leaving home) ---------------------
-  function cameraSnap() {
+  // ---- Live cameras pop-up (doorbell + garage side by side) --------------
+  function cameraLive() {
     var cams = cameras();
-    if (!cams.length) { openApp('settings'); return Toast.show('Add a camera under Settings → Cameras'); }
-    Modal.info('Camera snap',
-      '<div class="snap-grid flex wrap">' + cams.map(function (c) {
-        return '<div class="snap"><div class="cam-inner">' + Apps.cameras.media(c) + '<div class="cam-name"><span>' + esc(c.name) + '</span></div></div></div>';
-      }).join('') + '</div>' +
-      '<button class="btn small" data-action="open" data-app="cameras" style="margin-top:10px">Open Cameras</button>',
-      function () { Apps.cameras.stop(); });
+    var ring = cams.filter(function (c) { return c.type === 'ring'; })[0];
+    var garage = cams.filter(function (c) { return c.type !== 'ring'; })[0];
+    function tile(c, placeholder) {
+      if (!c) {
+        return '<div class="live-tile"><div class="cam-inner live-placeholder flex col center">' +
+          '<div class="lp-icon">' + placeholder.icon + '</div><div class="lp-title">' + placeholder.title + '</div>' +
+          '<div class="muted small">' + placeholder.sub + '</div></div></div>';
+      }
+      return '<div class="live-tile"><div class="cam-inner">' + Apps.cameras.media(c) +
+        '<div class="cam-name"><span>' + esc(c.name) + '</span></div></div></div>';
+    }
+    Modal.info('Cameras',
+      '<div class="live-grid flex">' +
+      tile(ring, { icon: '🔔', title: 'Doorbell', sub: 'Add your Ring doorbell under Settings → Cameras' }) +
+      tile(garage, { icon: '🚗', title: 'Garage camera (LSC)', sub: 'Not set up yet – add it under Settings → Cameras' }) +
+      '</div>' +
+      '<div class="flex between center" style="margin-top:10px"><span class="muted small">Streams stop when you close this.</span>' +
+      '<button class="btn small" data-action="open" data-app="cameras">Open Cameras screen</button></div>',
+      function () { Apps.cameras.stop(); }, 'wide');
     Apps.cameras.start($('modal-root'));
   }
 
@@ -1685,7 +1784,7 @@
     }).join('') : '<div class="pt-empty muted small">The list is empty 🎉</div>';
     $('groc-count').textContent = gi.length ? gi.length + ' item' + (gi.length > 1 ? 's' : '') : '';
     var nc = cameras().length;
-    $('snap-sub').textContent = nc ? nc + ' camera' + (nc > 1 ? 's' : '') : 'Set up in Settings';
+    $('snap-sub').textContent = 'Doorbell + garage';
 
     // Badges on dock buttons.
     setBadge('calendar', eventsOn(allEvents(), new Date()).length);
@@ -1775,7 +1874,7 @@
       return rerender();
     }
     if (action === 'home-groc-tick') { Apps.groceries.actions['groc-tick'](el); return renderHome(); }
-    if (action === 'util-snap') return cameraSnap();
+    if (action === 'util-snap') return cameraLive();
     if (action === 'home-todo-add') {
       return Apps.todo.editor({ text: '', who: el.getAttribute('data-who') });
     }
@@ -1787,6 +1886,12 @@
         Toast.show('Done: ' + t.text, function () { t.done = false; t.doneAt = null; Store.save('todos'); });
       });
       return Store.save('todos');
+    }
+    if (action === 'ring-sound') {
+      e.stopPropagation();
+      var vid = el.parentNode.querySelector('video');
+      if (vid) { vid.muted = !vid.muted; el.textContent = vid.muted ? '🔇' : '🔊'; var pp = vid.play(); if (pp && pp.catch) pp.catch(function () {}); }
+      return;
     }
     if (action === 'toast-undo') {
       var fn = Toast.undo;
