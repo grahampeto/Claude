@@ -194,7 +194,7 @@ Notes:
 
 Notes:
 - **Live view** starts when you tap **📷 Cameras** on the home screen (doorbell and garage side by side) or open the Cameras screen. It stops when you close it, or after a few idle minutes on the wall iPad, to save the doorbell battery. Tap 🔇 for sound. Tap a camera for full screen; there, **🎤 Talk** lets you speak through the doorbell. The first tap asks for microphone access and briefly reconnects, then the button toggles talk/mute, and closing full screen turns the microphone off. If Ring refuses, the tile shows the latest snapshot and says why. It needs iOS 15 or newer (WebRTC) and the latest worker code.
-- Doorbell notifications can show **up to 2 minutes late**, because the hub checks Ring every 2 minutes.
+- **When someone rings the doorbell,** an open hub plays a ding-dong through its speakers and opens the doorbell camera full screen, already connected with the microphone, but with your mic and the doorbell audio muted. **📞 Answer** unmutes both and switches on the doorbell speaker; then use **Mute** and **Hang up**. **Dismiss**, or a minute with no answer, closes it. The hub checks for presses every 10 seconds while it's on screen, so allow about 10–15 seconds. You can turn this on or off per device in ⚙️ **Settings → Home screen**; it's on by default for the wall iPad. iPads only allow sound after someone has tapped the hub once since it was opened. Setting **Settings → Safari → Microphone → Allow** lets the microphone connect without asking each time.
 - Ring lists the hub as **House Hub** under *Control Center → Authorized Client Devices*. You can remove it there at any time.
 - Because this uses Ring's unofficial API, Ring could change or block it without warning. If it stops working, log in again from Settings.
 

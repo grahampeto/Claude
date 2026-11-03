@@ -141,3 +141,24 @@ test('Ring talk: switches the doorbell speaker on (tries PATCH, then PUT)', asyn
     ]);
   } finally { global.fetch = real; }
 });
+
+test('Ring dings: latest doorbell press per device', async function () {
+  var worker = (await import('../house-hub.worker.js?dings')).default;
+  var env = { HUB_TOKEN: 'tok', HUB_KV: kv() };
+  await env.HUB_KV.put('ring_refresh_token', 'r0');
+  var real = global.fetch;
+  global.fetch = async function (u) {
+    u = String(u);
+    if (u === 'https://oauth.ring.com/oauth/token') return Response.json({ access_token: 'a', refresh_token: 'r1', expires_in: 3600 });
+    if (u.indexOf('/doorbots/42/history') > 0) return Response.json([{ id: 9, kind: 'motion', created_at: '2026-11-03T19:00:05Z' }, { id: 7, kind: 'ding', created_at: '2026-11-03T19:00:00Z' }]);
+    if (u.indexOf('/doorbots/43/history') > 0) return Response.json([{ id: 3, kind: 'motion', created_at: '2026-11-03T18:00:00Z' }]);
+    throw new Error('unexpected ' + u);
+  };
+  try {
+    var r = await worker.fetch(req('/ring/dings?ids=42,43,evil'), env);
+    assert.deepStrictEqual((await r.json()).dings, [
+      { id: '42', dingId: '7', at: '2026-11-03T19:00:00Z' },
+      { id: '43', dingId: '', at: '' }
+    ]);
+  } finally { global.fetch = real; }
+});

@@ -382,6 +382,7 @@
         var short = Math.min(window.screen.width, window.screen.height);
         d = { wall: short >= 700 };
       }
+      if (d.doorbell === undefined) d.doorbell = d.wall;
       return d;
     },
     set: function (d) { lsSet('househub.device', d); }
@@ -1147,7 +1148,7 @@
         this.end(sess);
         this.talkButton(v, '🎤 Talk', false);
         Toast.show('Talking isn\u2019t available (' + (why || 'refused') + ') – back to listen-only');
-        this.start(v);
+        this.start(v, null, { onLive: sess.onLive });
         return;
       }
       this.end(sess);
@@ -1165,10 +1166,14 @@
       if (b) { b.textContent = text; b.className = 'btn ring-talk' + (on ? ' on' : ''); }
     },
     // mic: a microphone MediaStream for two-way talk (otherwise listen-only).
-    start: function (video, mic) {
+    // opts.silent: connect with the mic but keep it and the doorbell audio
+    // muted until answer() (used by the incoming doorbell call).
+    start: function (video, mic, opts) {
       var self = this;
+      opts = opts || {};
       if (!this.supported()) { this.label(video, 'Snapshot (live view needs a newer browser)'); return; }
-      var sess = { video: video, deviceId: video.getAttribute('data-ring-live'), done: false, sessionId: null, mic: mic || null };
+      var sess = { video: video, deviceId: video.getAttribute('data-ring-live'), done: false, sessionId: null, mic: mic || null, silent: !!opts.silent, onLive: opts.onLive || null };
+      if (mic && opts.silent) mic.getAudioTracks()[0].enabled = false;
       this.sessions.push(sess);
       var pc = sess.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       try {
@@ -1186,8 +1191,12 @@
         if (sess.done) return;
         clearTimeout(sess.timer);
         video.className = 'cam-media ring-video';
+        var stale = video.parentNode && video.parentNode.querySelector('.cam-err'); // e.g. a failed snapshot
+        if (stale) stale.parentNode.removeChild(stale);
         var snd = video.parentNode && video.parentNode.querySelector('.ring-sound');
         if (snd) snd.className = 'btn small ring-sound';
+        if (sess.onLive) sess.onLive();
+        if (sess.silent) { self.label(video, '● Live · muted', true); return; }
         self.label(video, sess.mic ? '● Live · talking' : '● Live', true);
         if (sess.mic && !sess.speakerOn) {
           sess.speakerOn = true;
@@ -1254,6 +1263,30 @@
         self.talkButton(video, '🎤 Talk', false);
         Toast.show('Microphone access was refused – allow it in the browser settings to talk');
       });
+    },
+    // Incoming call "Answer": unmute the mic and the doorbell audio and switch
+    // the doorbell speaker on. Returns false if there's no mic session yet.
+    answer: function (video) {
+      var sess = this.find(video);
+      if (!sess || !sess.mic) return false;
+      sess.silent = false;
+      sess.mic.getAudioTracks()[0].enabled = true;
+      video.muted = false;
+      var pr = video.play(); if (pr && pr.catch) pr.catch(function () {});
+      this.label(video, '● Live · talking', true);
+      if (!sess.speakerOn) {
+        sess.speakerOn = true;
+        Store.googleCall('POST', '/ring/live/speaker', { sessionId: sess.sessionId }, function (err) {
+          if (err) Toast.show('The doorbell speaker didn\u2019t switch on – they may not hear you');
+        });
+      }
+      return true;
+    },
+    setMic: function (video, on) {
+      var sess = this.find(video);
+      if (!sess || !sess.mic) return;
+      sess.mic.getAudioTracks()[0].enabled = on;
+      this.label(video, on ? '● Live · talking' : '● Live · mic muted', true);
     },
     // Leaving full screen: stop sending the microphone (keeps watching).
     stopTalk: function (video) {
@@ -1322,7 +1355,7 @@
         el.parentNode.appendChild(e);
       }
       // Ring: live view over WebRTC (falls back to the refreshing snapshot).
-      var rings = root.querySelectorAll('video[data-ring-live]');
+      var rings = root.querySelectorAll('video[data-ring-live]:not([data-call])');
       for (var rv = 0; rv < rings.length; rv++) RingLive.start(rings[rv]);
       // Tuya/LSC: ask the worker for a fresh live-stream link (they expire).
       var vids = root.querySelectorAll('video[data-tuya]');
@@ -1447,6 +1480,8 @@
         '<div id="weather-status" class="small muted" style="margin-top:6px"></div>' +
         '<div class="row flex center" data-action="set-wall" style="padding:14px 0 0;border:0;min-height:0"><div class="check' + (dev.wall ? ' on' : '') + '" id="set-wall-check">' + (dev.wall ? '✓' : '') + '</div>' +
         '<div class="text grow">This device is the wall display<div class="meta">Goes back home after 3 idle minutes and dims 23:00–06:00. Only affects this device.</div></div></div>' +
+        '<div class="row flex center" data-action="set-doorbell" style="padding:14px 0 0;border:0;min-height:0"><div class="check' + (dev.doorbell ? ' on' : '') + '" id="set-doorbell-check">' + (dev.doorbell ? '✓' : '') + '</div>' +
+        '<div class="text grow">Ring and pop up when the doorbell rings<div class="meta">Plays a chime and opens the doorbell camera with Answer / Dismiss while the hub is open on this device.</div></div></div>' +
         '</div>' +
 
         '<div class="section-label">House Hub worker (Google Calendar &amp; cameras)</div>' +
@@ -1650,6 +1685,12 @@
         $('set-wall-check').className = 'check' + (d.wall ? ' on' : '');
         $('set-wall-check').textContent = d.wall ? '✓' : '';
       },
+      'set-doorbell': function () {
+        var d = Device.get(); d.doorbell = !d.doorbell; Device.set(d);
+        $('set-doorbell-check').className = 'check' + (d.doorbell ? ' on' : '');
+        $('set-doorbell-check').textContent = d.doorbell ? '✓' : '';
+        if (d.doorbell) Chime.unlock();
+      },
       'set-addcal': function () {
         var url = $('cal-url').value.trim();
         if (!url) return;
@@ -1802,6 +1843,152 @@
       function () { Apps.cameras.stop(); }, 'wide', 'cameras');
     Apps.cameras.start($('modal-root'));
   }
+
+  // ---- Doorbell chime (Web Audio, no sound file needed) ----------------------
+  // iOS only lets a page make sound after a tap, so the audio is unlocked on
+  // the first touch and kept ready for when the doorbell rings.
+  var Chime = {
+    ctx: null,
+    unlock: function () {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!this.ctx) { try { this.ctx = new AC(); } catch (e) { return; } }
+      if (this.ctx.state === 'suspended' && this.ctx.resume) this.ctx.resume();
+      var b = this.ctx.createBuffer(1, 1, 22050), src = this.ctx.createBufferSource();
+      src.buffer = b; src.connect(this.ctx.destination); if (src.start) src.start(0); else src.noteOn(0);
+    },
+    tone: function (freq, at, len) {
+      var c = this.ctx, o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.6, at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + len);
+      o.connect(g); g.connect(c.destination);
+      o.start(at); o.stop(at + len + 0.05);
+    },
+    dingDong: function () {
+      if (!this.ctx) return false;
+      if (this.ctx.state === 'suspended' && this.ctx.resume) this.ctx.resume();
+      var t = this.ctx.currentTime + 0.05;
+      this.tone(659.3, t, 1.1); this.tone(1318.5, t, 0.5);          // ding (E5)
+      this.tone(523.3, t + 0.6, 1.6); this.tone(1046.5, t + 0.6, 0.6); // dong (C5)
+      return this.ctx.state === 'running';
+    }
+  };
+  function unlockAudio() { Chime.unlock(); document.removeEventListener('touchend', unlockAudio, false); document.removeEventListener('click', unlockAudio, false); }
+  document.addEventListener('touchend', unlockAudio, false);
+  document.addEventListener('click', unlockAudio, false);
+
+  // ---- Incoming doorbell call ----------------------------------------------
+  var DoorCall = {
+    active: null,
+    open: function (cam, at) {
+      if (this.active) return;
+      poke();                                   // wake the night dimmer
+      if (current) goHome();
+      Modal.close();
+      Apps.cameras.stop();
+      var ov = document.createElement('div');
+      ov.className = 'cam-full door-call';
+      ov.innerHTML = '<div class="cam-inner">' + Apps.cameras.media(cam) + '<div class="cam-name"><span>' + esc(cam.name) + '</span></div></div>' +
+        '<div class="call-top"><div class="call-title">🔔 Someone\u2019s at the door</div><div class="call-sub">' + esc(cam.name) + ' · ' + fmtTime(at) + '</div></div>' +
+        '<div class="call-buttons flex">' +
+        '<button class="call-btn decline" data-action="call-end">Dismiss</button>' +
+        '<button class="call-btn answer" data-action="call-answer">📞 Answer</button></div>';
+      document.body.appendChild(ov);
+      var video = ov.querySelector('video[data-ring-live]');
+      video.setAttribute('data-call', '1');
+      var call = this.active = { ov: ov, video: video, answered: false, timers: [] };
+      Apps.cameras.start(ov);                   // snapshot underneath while connecting
+
+      // Connect with the mic already in the call (muted); fall back to
+      // listen-only if the browser wants a tap before using the mic.
+      var self = this;
+      function listenOnly() { if (self.active === call) RingLive.start(video, null, { silent: true }); }
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(function (mic) {
+          if (self.active !== call) { mic.getTracks().forEach(function (t) { t.stop(); }); return; }
+          RingLive.start(video, mic, { silent: true });
+        })['catch'](listenOnly);
+      } else listenOnly();
+
+      // Ring until answered, for up to a minute; then give up.
+      Chime.dingDong();
+      call.timers.push(setInterval(function () { if (!call.answered) Chime.dingDong(); }, 4000));
+      call.timers.push(setTimeout(function () { if (!call.answered) self.close(); }, 60000));
+    },
+    answer: function () {
+      var call = this.active;
+      if (!call || call.answered) return;
+      call.answered = true;
+      call.ov.className = 'cam-full door-call answered';
+      call.ov.querySelector('.call-title').textContent = '📞 On the doorbell';
+      call.ov.querySelector('.call-buttons').innerHTML =
+        '<button class="call-btn mute" data-action="call-mute">🎤 Mute</button>' +
+        '<button class="call-btn decline" data-action="call-end">Hang up</button>';
+      if (!RingLive.answer(call.video)) {
+        // No mic yet (browser needed a tap): connect it now – a short blip.
+        var self = this;
+        navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(function (mic) {
+          if (self.active !== call) { mic.getTracks().forEach(function (t) { t.stop(); }); return; }
+          var old = RingLive.find(call.video);
+          if (old) RingLive.end(old);
+          RingLive.start(call.video, mic, { onLive: function () { RingLive.answer(call.video); } });
+        })['catch'](function () {
+          call.video.muted = false;
+          Toast.show('Microphone access was refused – you can hear them but they can\u2019t hear you');
+        });
+      }
+    },
+    toggleMute: function (btn) {
+      var call = this.active;
+      if (!call) return;
+      call.muted = !call.muted;
+      RingLive.setMic(call.video, !call.muted);
+      btn.textContent = call.muted ? '🎤 Unmute' : '🎤 Mute';
+      btn.className = 'call-btn mute' + (call.muted ? ' on' : '');
+    },
+    close: function () {
+      var call = this.active;
+      if (!call) return;
+      this.active = null;
+      call.timers.forEach(function (t) { clearInterval(t); clearTimeout(t); });
+      Apps.cameras.stop();
+      if (call.ov.parentNode) call.ov.parentNode.removeChild(call.ov);
+    }
+  };
+
+  // Check for doorbell presses every 10s while the hub is on screen.
+  var DoorWatch = {
+    seen: lsGet('househub.seenDings', {}),
+    primed: false,
+    tick: function () {
+      if (document.hidden || DoorCall.active || !Store.workerOn() || !Device.get().doorbell) return;
+      var rings = cameras().filter(function (c) { return c.type === 'ring'; });
+      if (!rings.length) return;
+      var self = this;
+      Store.googleCall('GET', '/ring/dings?ids=' + rings.map(function (c) { return encodeURIComponent(c.deviceId); }).join(','), null, function (err, res) {
+        if (err || !res) return;
+        var now = Date.now();
+        (res.dings || []).forEach(function (d) {
+          if (!d.dingId) return;
+          var isNew = self.seen[d.id] !== d.dingId;
+          self.seen[d.id] = d.dingId;
+          // Don't ring for presses that happened before the hub was opened.
+          var at = parseISO(d.at), fresh = now - at.getTime() < 3 * 60000;
+          if (isNew && self.primed && fresh) {
+            var cam = rings.filter(function (c) { return String(c.deviceId) === String(d.id); })[0];
+            if (cam) DoorCall.open(cam, at);
+            Store.pullRing(); // refresh the agenda's "Someone rang" line too
+          }
+        });
+        self.primed = true;
+        lsSet('househub.seenDings', self.seen);
+      });
+    }
+  };
+  setInterval(function () { DoorWatch.tick(); }, 10000);
+  setTimeout(function () { DoorWatch.tick(); }, 2000);
 
   // ---- Home screen ----------------------------------------------------------
 
@@ -1990,6 +2177,9 @@
       ovl.parentNode.removeChild(ovl);
       return;
     }
+    if (action === 'call-answer') return DoorCall.answer();
+    if (action === 'call-mute') return DoorCall.toggleMute(el);
+    if (action === 'call-end') return DoorCall.close();
     if (action === 'ring-talk') {
       e.stopPropagation();
       var tv = el.parentNode.querySelector('video[data-ring-live]');

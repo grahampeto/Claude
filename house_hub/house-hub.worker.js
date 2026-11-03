@@ -415,6 +415,23 @@ async function ringDevices(env) {
   return json({ devices: out });
 }
 
+// Lightweight check for doorbell presses (the hub polls this every ~10s
+// while it's on screen): latest ding per doorbell, nothing else.
+async function ringDings(env, url) {
+  const ids = (url.searchParams.get('ids') || '').split(',').filter((x) => /^\d+$/.test(x)).slice(0, 5);
+  if (!ids.length) return json({ dings: [] });
+  const dings = await Promise.all(ids.map(async (id) => {
+    try {
+      const h = await (await ringFetch(env, '/doorbots/' + id + '/history?limit=5')).json();
+      const d = (h || []).filter((e) => e.kind === 'ding')[0];
+      return d ? { id, dingId: String(d.id), at: d.created_at } : { id, dingId: '', at: '' };
+    } catch (e) {
+      return { id, dingId: '', at: '', error: e.message };
+    }
+  }));
+  return json({ dings });
+}
+
 async function ringSnapshot(env, id) {
   let res;
   try {
@@ -554,6 +571,7 @@ export default {
         if (!env.HUB_KV) return json({ error: 'Ring needs the HUB_KV binding on the worker' }, 501);
         if (p === '/ring/login' && request.method === 'POST') return await ringLogin(env, request);
         if (p === '/ring/devices' && request.method === 'GET') return await ringDevices(env);
+        if (p === '/ring/dings' && request.method === 'GET') return await ringDings(env, url);
         if (p === '/ring/live/start' && request.method === 'POST') return await ringLiveStart(env, request);
         if (p === '/ring/live/end' && request.method === 'POST') return await ringLiveEnd(env, request);
         if (p === '/ring/live/speaker' && request.method === 'POST') return await ringLiveSpeaker(env, request);
