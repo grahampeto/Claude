@@ -90,7 +90,8 @@ dialog form { padding: 18px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 .err { color: var(--bad); font-size: .9rem; margin-top: 8px; }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; }
-#sync { font-size: .85rem; }
+#sync { font-size: .85rem; color: var(--warn); }
+#sync:empty { display: none; }
 .chip.paused { background: var(--line); color: var(--muted); }
 .med.paused .med-name { color: var(--muted); }
 .group-label { font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 16px 0 4px; }
@@ -133,7 +134,7 @@ fieldset.seg input { width: auto; }
 <main>
   <div>
     <h1>Pill Tracker</h1>
-    <div id="sync" class="muted">Loading…</div>
+    <div id="sync" role="status"></div>
   </div>
 
   <nav class="tabs" aria-label="Sections">
@@ -403,7 +404,7 @@ async function initCloud() {
     cloud = null; setSync("Couldn't reach your Claude account. Saved in this browser only.");
   }
 }
-const SYNC_OK = "Saved privately to your Claude account. Only you can see it.";
+const SYNC_OK = "";   // nothing shown while saving works; the line only appears for a problem
 // Resolves true once the change is stored in your account, false if it only reached this browser.
 function push() {
   if (!cloud) return Promise.resolve(false);
