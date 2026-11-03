@@ -590,3 +590,6 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
   padding: 14px 22px; border-radius: 28px; border: 1px solid rgba(255,255,255,.25); }
 .live-close:active { background: #4f8cff; }
 .live-tile .cam-inner[data-action] { cursor: pointer; }
+.modal-link { cursor: pointer; display: inline-block; }
+.modal-link .ml-arrow { color: #6ea0ff; }
+.modal-link:active { opacity: .7; }

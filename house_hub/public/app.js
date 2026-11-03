@@ -458,10 +458,10 @@
       if (first) setTimeout(function () { first.focus(); }, 50);
     },
     // A pop-up with just a Close button (QR code, camera snap).
-    info: function (title, html, onClose, cls) {
+    info: function (title, html, onClose, cls, titleApp) {
       $('modal-root').innerHTML =
         '<div class="modal-bg" data-action="modal-bg"><div class="modal' + (cls ? ' ' + cls : '') + '">' +
-        '<h3>' + esc(title) + '</h3>' + html +
+        (titleApp ? '<h3 class="modal-link" data-action="open" data-app="' + titleApp + '">' + esc(title) + ' <span class="ml-arrow">›</span></h3>' : '<h3>' + esc(title) + '</h3>') + html +
         '<div class="modal-actions flex"><button class="btn primary" data-action="modal-cancel">Close</button></div>' +
         '</div></div>';
       this.onSave = null;
@@ -1287,7 +1287,12 @@
           img.parentNode.appendChild(e);
         };
         var age = root.querySelector('[data-age="' + img.getAttribute('data-cam') + '"]');
-        function loaded() { if (age && !age.getAttribute('data-live')) age.textContent = (cam && cam.type === 'ring' ? 'Snapshot ' : 'Snapshot checked ') + fmtTime(new Date()) + (cam && cam.type === 'ring' && age.getAttribute('data-failed') ? ' · live view unavailable' : ''); }
+        function loaded() {
+          if (!age || age.getAttribute('data-live')) return;
+          var isRing = cam && cam.type === 'ring';
+          age.textContent = (isRing ? 'Snapshot ' : 'Snapshot checked ') + fmtTime(new Date()) +
+            (isRing ? (age.getAttribute('data-failed') ? ' · live view unavailable' : ' · connecting live…') : '');
+        }
         img.onload = loaded;
         img.src = bust();
         if (cam && (cam.type === 'snapshot' || cam.type === 'ring')) {
@@ -1731,9 +1736,8 @@
       tile(ring, { icon: '🔔', title: 'Doorbell', sub: 'Add your Ring doorbell under Settings → Cameras' }) +
       tile(garage, { icon: '🚗', title: 'Garage camera (LSC)', sub: 'Not set up yet – add it under Settings → Cameras' }) +
       '</div>' +
-      '<div class="flex between center" style="margin-top:10px"><span class="muted small">Streams stop when you close this.</span>' +
-      '<button class="btn small" data-action="open" data-app="cameras">Open Cameras screen</button></div>',
-      function () { Apps.cameras.stop(); }, 'wide');
+      '<p class="muted small" style="margin:10px 0 0">Tap a camera for full screen · tap “Cameras” for the Cameras screen · streams stop when you close this.</p>',
+      function () { Apps.cameras.stop(); }, 'wide', 'cameras');
     Apps.cameras.start($('modal-root'));
   }
 
@@ -1845,7 +1849,10 @@
     var el = closestAction(e.target);
     if (!el) return;
     var action = el.getAttribute('data-action');
-    if (action === 'open') return openApp(el.getAttribute('data-app'), { who: el.getAttribute('data-who') });
+    if (action === 'open') {
+      if ($('modal-root').innerHTML) Modal.close(); // e.g. "Cameras ›" in the cameras pop-up
+      return openApp(el.getAttribute('data-app'), { who: el.getAttribute('data-who') });
+    }
     if (action === 'home') return goHome();
     if (action === 'modal-cancel') return Modal.close();
     if (action === 'modal-bg') { if (e.target === el) Modal.close(); return; }
