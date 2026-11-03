@@ -40,6 +40,7 @@ async function setup() {
       return Response.json(Object.assign({ id: 'new1' }, b));
     }
     if (init.method === 'DELETE') return new Response(null, { status: 204 });
+    if (init.method === 'PATCH') return Response.json(Object.assign({ id: 'e1' }, JSON.parse(init.body)));
     return Response.json({ summary: u.indexOf('family') >= 0 ? 'Family' : 'Me' });
   };
   return { worker: worker, env: env, calls: calls };
@@ -74,6 +75,23 @@ test('worker: Google list / create / delete and auth', async function () {
     var post = s.calls.filter(function (x) { return x.init.method === 'POST' && x.url.indexOf('/events') > 0; })[0];
     assert.ok(post.url.indexOf(encodeURIComponent('family@group.calendar.google.com')) > 0, 'defaults to first calendar');
     assert.strictEqual(JSON.parse(post.init.body).colorId, '4');
+
+    // Edit: rename, switch to all-day, pick a colour.
+    var e = await s.worker.fetch(req('/google/events/' + encodeURIComponent('me@gmail.com') + '/e1', { method: 'PATCH', body: JSON.stringify({ title: 'Dentist (moved)', allDay: true, start: '2026-11-07', end: '2026-11-08', who: 'graham', colorId: '11' }) }), s.env);
+    assert.strictEqual(e.status, 200);
+    var patch = s.calls.filter(function (x) { return x.init.method === 'PATCH'; })[0];
+    var pb = JSON.parse(patch.init.body);
+    assert.ok(/\/calendars\/me%40gmail\.com\/events\/e1$/.test(patch.url), patch.url);
+    assert.deepStrictEqual(pb.start, { date: '2026-11-07', dateTime: null });
+    assert.strictEqual(pb.colorId, '11');
+    assert.strictEqual(pb.summary, 'Dentist (moved)');
+    assert.strictEqual(pb.extendedProperties.private.houseHubWho, 'graham');
+    // "Auto" colour falls back to the who-colour; new events don't send nulls.
+    await s.worker.fetch(req('/google/events/' + encodeURIComponent('me@gmail.com') + '/e1', { method: 'PATCH', body: JSON.stringify({ title: 'x', allDay: false, start: '2026-11-07T10:00:00+01:00', end: '2026-11-07T11:00:00+01:00', who: 'jess', colorId: '' }) }), s.env);
+    var pb2 = JSON.parse(s.calls.filter(function (x) { return x.init.method === 'PATCH'; })[1].init.body);
+    assert.strictEqual(pb2.colorId, '4');
+    assert.deepStrictEqual(pb2.start, { dateTime: '2026-11-07T10:00:00+01:00', date: null });
+    assert.strictEqual(JSON.parse(post.init.body).start.date, undefined);
 
     var d = await s.worker.fetch(req('/google/events/' + encodeURIComponent('me@gmail.com') + '/e1', { method: 'DELETE' }), s.env);
     assert.strictEqual(d.status, 200);

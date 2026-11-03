@@ -38,7 +38,7 @@ const GCAL = 'https://www.googleapis.com/calendar/v3';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   'Access-Control-Max-Age': '86400',
 };
@@ -178,7 +178,8 @@ function calendarIds(env) {
 const WHO_COLOR = { jess: '4', graham: '2', both: '9' }; // Flamingo, Sage, Blueberry
 
 function simplify(ev, cal) {
-  const allDay = !!(ev.start && ev.start.date);
+  const st = ev.start || {}, en = ev.end || {};
+  const allDay = !!st.date;
   const priv = (ev.extendedProperties && ev.extendedProperties.private) || {};
   return {
     id: ev.id,
@@ -188,9 +189,10 @@ function simplify(ev, cal) {
     location: ev.location || '',
     allDay,
     // All-day dates are passed through as YYYY-MM-DD so the device can read them in local time.
-    start: allDay ? ev.start.date : ev.start.dateTime,
-    end: allDay ? ev.end.date : ev.end.dateTime,
+    start: allDay ? st.date : st.dateTime,
+    end: allDay ? en.date : en.dateTime,
     who: priv.houseHubWho || '',
+    colorId: ev.colorId || '',
   };
 }
 
@@ -234,15 +236,38 @@ async function createEvent(env, request) {
     description: 'Added from House Hub',
     extendedProperties: { private: { houseHubWho: b.who || '' } },
   };
-  if (WHO_COLOR[b.who]) body.colorId = WHO_COLOR[b.who];
-  if (b.allDay) {
-    body.start = { date: b.start };
-    body.end = { date: b.end || b.start };
-  } else {
-    body.start = { dateTime: b.start };
-    body.end = { dateTime: b.end || b.start };
-  }
+  applyColorAndTimes(body, b);
   const ev = await gcal(env, '/calendars/' + encodeURIComponent(calId) + '/events', { method: 'POST', body: JSON.stringify(body) });
+  return json(simplify(ev, { id: calId, name: '' }));
+}
+
+// Shared by create and edit. colorId: "1"–"11" picks a Google colour;
+// empty means "auto" – the who-colour (Jess/Graham/Both) if there is one.
+// When editing, the unused one of date/dateTime is cleared (null) so an
+// event can switch between all-day and timed.
+function applyColorAndTimes(body, b, isEdit) {
+  const color = /^([1-9]|1[01])$/.test(String(b.colorId || '')) ? String(b.colorId) : WHO_COLOR[b.who];
+  if (color) body.colorId = color;
+  if (b.start) {
+    if (b.allDay) {
+      body.start = { date: b.start };
+      body.end = { date: b.end || b.start };
+      if (isEdit) { body.start.dateTime = null; body.end.dateTime = null; }
+    } else {
+      body.start = { dateTime: b.start };
+      body.end = { dateTime: b.end || b.start };
+      if (isEdit) { body.start.date = null; body.end.date = null; }
+    }
+  }
+}
+
+async function updateEvent(env, request, calId, eventId) {
+  if (!calendarIds(env).includes(calId)) return json({ error: 'unknown calendar' }, 404);
+  const b = await request.json();
+  if (!b.title) return json({ error: 'title is required' }, 400);
+  const body = { summary: b.title, extendedProperties: { private: { houseHubWho: b.who || '' } } };
+  applyColorAndTimes(body, b, true);
+  const ev = await gcal(env, '/calendars/' + encodeURIComponent(calId) + '/events/' + encodeURIComponent(eventId), { method: 'PATCH', body: JSON.stringify(body) });
   return json(simplify(ev, { id: calId, name: '' }));
 }
 
@@ -468,6 +493,7 @@ export default {
         if (p === '/google/events' && request.method === 'POST') return await createEvent(env, request);
         const m = /^\/google\/events\/([^/]+)\/([^/]+)$/.exec(p);
         if (m && request.method === 'DELETE') return await deleteEvent(env, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
+        if (m && request.method === 'PATCH') return await updateEvent(env, request, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
       }
       if (p.startsWith('/tuya/')) {
         if (!env.TUYA_CLIENT_ID || !env.TUYA_CLIENT_SECRET) return json({ error: 'Tuya is not set up on the worker' }, 501);

@@ -436,6 +436,18 @@
     off = Math.abs(off);
     return dateKey + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':00' + sign + pad(Math.floor(off / 60)) + ':' + pad(off % 60);
   }
+  // Google Calendar's own event colours, so events look the same in both.
+  var GCOLORS = { '1': '#7986cb', '2': '#33b679', '3': '#8e24aa', '4': '#e67c73', '5': '#f6bf26', '6': '#f4511e', '7': '#039be5', '8': '#616161', '9': '#3f51b5', '10': '#0b8043', '11': '#d50000' };
+  var GCOLOR_NAMES = { '1': 'Lavender', '2': 'Sage', '3': 'Grape', '4': 'Flamingo', '5': 'Banana', '6': 'Tangerine', '7': 'Peacock', '8': 'Graphite', '9': 'Blueberry', '10': 'Basil', '11': 'Tomato' };
+  function colorPicker(selected) {
+    var h = '<div class="seg swatches flex wrap" data-name="color">' +
+      '<button class="opt auto' + (!selected ? ' on' : '') + '" data-action="seg" data-value="">Auto</button>';
+    for (var i = 1; i <= 11; i++) {
+      var k = String(i);
+      h += '<button class="opt swatch' + (selected === k ? ' on' : '') + '" data-action="seg" data-value="' + k + '" title="' + GCOLOR_NAMES[k] + '" style="background:' + GCOLORS[k] + '"></button>';
+    }
+    return h + '</div>';
+  }
   var GCAL_COLORS = ['#4f8cff', '#f5a623', '#7b61ff', '#3fbf7f', '#e86fa8'];
   function googleCalColor(id) {
     var cals = Store.google.calendars;
@@ -463,9 +475,12 @@
       out.push({ title: '🗑️ ' + binLabel(p), allDay: true, start: parseDay(p.date), color: info.color, calendar: 'Bin collection', bin: true });
     });
     Store.data.events.forEach(function (e) {
-      var start = parseDay(e.date);
-      if (e.time) { var t = e.time.split(':'); start.setHours(+t[0], +t[1]); }
-      out.push({ id: e.id, local: true, title: e.title, who: e.who, allDay: !e.time, start: start, color: '' });
+      var start = parseDay(e.date), end = null, endDay = e.endDate && e.endDate > e.date ? e.endDate : e.date;
+      if (e.time) {
+        var t = e.time.split(':'); start.setHours(+t[0], +t[1]);
+        if (e.end) { end = parseDay(endDay); var t2 = e.end.split(':'); end.setHours(+t2[0], +t2[1]); }
+      } else if (endDay > e.date) end = addDays(parseDay(endDay), 1);
+      out.push({ id: e.id, local: true, title: e.title, who: e.who, colorId: e.colorId || '', allDay: !e.time, start: start, end: end, color: GCOLORS[e.colorId] || '' });
     });
     (Store.calendar.events || []).forEach(function (e) {
       out.push({ title: e.title, location: e.location, allDay: e.allDay, start: new Date(e.start), end: new Date(e.end), color: e.color, calendar: e.calendar });
@@ -473,9 +488,9 @@
     if (Store.googleOn()) {
       Store.google.events.forEach(function (e) {
         out.push({
-          id: e.id, gcal: e.calendarId, title: e.title, location: e.location, allDay: e.allDay, who: e.who,
+          id: e.id, gcal: e.calendarId, title: e.title, location: e.location, allDay: e.allDay, who: e.who, colorId: e.colorId || '',
           start: parseISO(e.start), end: parseISO(e.end), calendar: e.calendar,
-          color: e.who ? '' : googleCalColor(e.calendarId)
+          color: GCOLORS[e.colorId] || (e.who ? '' : googleCalColor(e.calendarId))
         });
       });
     }
@@ -543,11 +558,14 @@
       var dh = '<h3 style="margin:6px 0 14px">' + fmtDayLong(sel) + '</h3>';
       if (!dayEvs.length) dh += '<div class="list"><div class="list-empty">Nothing planned</div></div>';
       dayEvs.forEach(function (e) {
-        dh += '<div class="ev flex center" style="border-left-color:' + esc(eventColor(e)) + '"><div class="grow">' +
+        var editable = e.local || e.gcal;
+        dh += '<div class="ev flex center' + (editable ? ' editable' : '') + '" style="border-left-color:' + esc(eventColor(e)) + '"' +
+          (editable ? ' data-action="cal-edit" data-id="' + esc(e.id) + '"' + (e.gcal ? ' data-gcal="' + esc(e.gcal) + '"' : '') : '') + '><div class="grow">' +
           '<div class="t">' + (e.allDay ? 'All day' : fmtTime(e.start) + (e.end ? ' – ' + fmtTime(e.end) : '')) +
           (e.calendar ? ' · ' + esc(e.calendar) : '') + '</div>' +
           '<div class="n">' + (e.who ? whoTag(e.who) : '') + esc(e.title) + '</div>' +
           (e.location ? '<div class="t">' + esc(e.location) + '</div>' : '') + '</div>' +
+          (editable ? '<span class="muted small" style="margin-right:6px">Edit</span>' : '') +
           (e.local || e.gcal ? '<button class="del" data-action="cal-del" data-id="' + esc(e.id) + '"' + (e.gcal ? ' data-gcal="' + esc(e.gcal) + '"' : '') + '>✕</button>' : '') +
           '</div>';
       });
@@ -562,10 +580,11 @@
       'cal-del': function (el) {
         var id = el.getAttribute('data-id'), gcal = el.getAttribute('data-gcal');
         if (!confirm(gcal ? 'Delete this event from Google Calendar?' : 'Delete this event?')) return;
+        Modal.close();
         if (gcal) {
           Store.google.events = Store.google.events.filter(function (e) { return e.id !== id; });
           Store.googleCall('DELETE', '/google/events/' + encodeURIComponent(gcal) + '/' + encodeURIComponent(id), null, function (err) {
-            if (err) alert('Couldn\u2019t delete from Google: ' + err.message);
+            if (err) alert('Couldn’t delete from Google: ' + err.message);
             Store.pullGoogle();
           });
           return;
@@ -573,46 +592,86 @@
         Store.data.events = Store.data.events.filter(function (e) { return e.id !== id; });
         Store.save('events');
       },
-      'cal-add': function () {
-        var google = Store.googleOn() && Store.google.calendars.length;
-        var calPicker = google && Store.google.calendars.length > 1
-          ? '<label class="lbl">Google calendar</label>' + segHtml('cal', Store.google.calendars.map(function (c) { return [c.id, c.name]; }), Store.google.calendars[0].id)
-          : '';
-        Modal.open(google ? 'New event (saved to Google Calendar)' : 'New event',
-          '<input class="field" name="title" placeholder="What?">' +
-          '<label class="lbl">Date</label><input class="field" type="date" name="date" value="' + Apps.calendar.selected + '">' +
-          '<div class="flex"><div class="grow" style="margin-right:10px"><label class="lbl">Start (blank = all day)</label><input class="field" type="time" name="time"></div>' +
-          '<div class="grow"><label class="lbl">End (optional)</label><input class="field" type="time" name="end"></div></div>' +
-          '<label class="lbl">Who</label>' + segHtml('who', WHO_OPTS, 'both') + calPicker,
-          function () {
-            var title = Modal.val('title'), date = Modal.val('date'), time = Modal.val('time'), end = Modal.val('end'), who = Modal.seg('who');
-            if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-            function saveLocal() {
-              Store.data.events.push({ id: uid(), title: title, date: date, time: time, who: who });
-              Store.save('events');
-            }
-            if (!google) return saveLocal();
-            var body = { title: title, who: who, calendarId: Modal.seg('cal') || Store.google.calendars[0].id };
-            if (time) {
-              body.allDay = false;
-              body.start = isoLocal(date, time);
-              if (!end || end <= time) { var t = time.split(':'); end = pad(Math.min(23, +t[0] + 1)) + ':' + (+t[0] >= 23 ? '59' : t[1]); }
-              body.end = isoLocal(date, end);
-            } else {
-              body.allDay = true; body.start = date; body.end = dayKey(addDays(parseDay(date), 1));
-            }
-            // Show it straight away; replaced by the real event on the next refresh.
+      'cal-add': function () { Apps.calendar.editor(null); },
+      'cal-edit': function (el) {
+        var id = el.getAttribute('data-id'), gcal = el.getAttribute('data-gcal');
+        if (/^pending-/.test(id)) return Toast.show('Still saving to Google – try again in a moment');
+        var ev = allEvents().filter(function (e) { return e.id === id && (gcal ? e.gcal === gcal : e.local); })[0];
+        if (ev) Apps.calendar.editor(ev);
+      }
+    },
+
+    // One form for adding and editing. Events go to Google when it's connected
+    // (or when the event came from Google), otherwise they're kept in the hub.
+    editor: function (ev) {
+      var isNew = !ev;
+      var toGoogle = ev ? !!ev.gcal : !!(Store.googleOn() && Store.google.calendars.length);
+      var date = ev ? dayKey(ev.start) : Apps.calendar.selected;
+      var time = ev && !ev.allDay ? fmtTime(ev.start) : '';
+      var endTime = ev && !ev.allDay && ev.end ? fmtTime(ev.end) : '';
+      var endDate = date;
+      if (ev && ev.end) endDate = dayKey(ev.allDay ? new Date(ev.end.getTime() - 1) : ev.end);
+      if (endDate < date) endDate = date;
+      var calPicker = isNew && toGoogle && Store.google.calendars.length > 1
+        ? '<label class="lbl">Google calendar</label>' + segHtml('cal', Store.google.calendars.map(function (c) { return [c.id, c.name]; }), Store.google.calendars[0].id)
+        : '';
+      var title = isNew ? (toGoogle ? 'New event (saved to Google Calendar)' : 'New event') : (toGoogle ? 'Edit event (Google Calendar)' : 'Edit event');
+      Modal.open(title,
+        '<input class="field" name="title" placeholder="What?" value="' + esc(ev ? ev.title : '') + '">' +
+        '<div class="flex"><div class="grow" style="margin-right:10px"><label class="lbl">Date</label><input class="field" type="date" name="date" value="' + date + '"></div>' +
+        '<div class="grow"><label class="lbl">End date</label><input class="field" type="date" name="enddate" value="' + endDate + '"></div></div>' +
+        '<div class="flex"><div class="grow" style="margin-right:10px"><label class="lbl">Start time (blank = all day)</label><input class="field" type="time" name="time" value="' + time + '"></div>' +
+        '<div class="grow"><label class="lbl">End time</label><input class="field" type="time" name="end" value="' + endTime + '"></div></div>' +
+        '<label class="lbl">Who</label>' + segHtml('who', WHO_OPTS, ev ? ev.who || '' : 'both') +
+        '<label class="lbl">Colour <span class="muted">(Auto = by who)</span></label>' + colorPicker(ev ? ev.colorId : '') +
+        calPicker +
+        (isNew ? '' : '<button class="btn danger small" data-action="cal-del" data-id="' + esc(ev.id) + '"' + (ev.gcal ? ' data-gcal="' + esc(ev.gcal) + '"' : '') + '>Delete event</button>'),
+        function () {
+          var t = Modal.val('title'), d = Modal.val('date'), ed = Modal.val('enddate') || d, st = Modal.val('time'), et = Modal.val('end');
+          var who = Modal.seg('who'), colorId = Modal.seg('color');
+          if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(d)) { alert('Give the event a name and a date.'); return false; }
+          if (ed < d) ed = d;
+          if (st && (!et || (ed === d && et <= st))) {
+            var h = +st.split(':')[0];
+            et = h >= 23 ? '23:59' : pad(h + 1) + ':' + st.split(':')[1]; // default: one hour
+          }
+
+          if (!toGoogle) {
+            var obj = { id: ev ? ev.id : uid(), title: t, date: d, endDate: ed, time: st, end: st ? et : '', who: who, colorId: colorId };
+            if (isNew) Store.data.events.push(obj);
+            else Store.data.events = Store.data.events.map(function (x) { return x.id === obj.id ? obj : x; });
+            Store.save('events');
+            return;
+          }
+
+          var body = { title: t, who: who, colorId: colorId, allDay: !st };
+          if (st) { body.start = isoLocal(d, st); body.end = isoLocal(ed, et); }
+          else { body.start = d; body.end = dayKey(addDays(parseDay(ed), 1)); }
+          // Show the change straight away; the next refresh brings Google's copy.
+          var shown = { title: t, who: who, colorId: colorId, allDay: body.allDay, start: body.start, end: body.end, location: ev ? ev.location : '' };
+          if (isNew) {
+            body.calendarId = Modal.seg('cal') || Store.google.calendars[0].id;
             var cal = Store.google.calendars.filter(function (c) { return c.id === body.calendarId; })[0];
-            Store.google.events.push({ id: 'pending-' + uid(), calendarId: body.calendarId, calendar: cal ? cal.name : '', title: title, location: '', allDay: body.allDay, start: body.start, end: body.end, who: who });
+            shown.id = 'pending-' + uid(); shown.calendarId = body.calendarId; shown.calendar = cal ? cal.name : '';
+            Store.google.events.push(shown);
             Store.googleCall('POST', '/google/events', body, function (err) {
               if (err) {
-                alert('Couldn\u2019t save to Google (' + err.message + '). Saved in House Hub instead.');
-                saveLocal();
+                alert('Couldn’t save to Google (' + err.message + '). Saved in House Hub instead.');
+                Store.data.events.push({ id: uid(), title: t, date: d, endDate: ed, time: st, end: st ? et : '', who: who, colorId: colorId });
+                Store.save('events');
               }
               Store.pullGoogle();
             });
-          });
-      }
+          } else {
+            Store.google.events.forEach(function (x) {
+              if (x.id === ev.id && x.calendarId === ev.gcal) { for (var k in shown) if (shown.hasOwnProperty(k)) x[k] = shown[k]; }
+            });
+            Store.googleCall('PATCH', '/google/events/' + encodeURIComponent(ev.gcal) + '/' + encodeURIComponent(ev.id), body, function (err) {
+              if (err) alert('Couldn’t update Google Calendar: ' + err.message);
+              Store.pullGoogle();
+            });
+          }
+        });
     }
   };
 
@@ -1599,8 +1658,8 @@
     }
     if (action === 'seg') {
       var opts = el.parentNode.children;
-      for (var i = 0; i < opts.length; i++) opts[i].className = 'opt';
-      el.className = 'opt on';
+      for (var i = 0; i < opts.length; i++) opts[i].className = opts[i].className.replace(/(^|\s)on(\s|$)/g, ' ').replace(/\s+$/, '');
+      el.className += ' on';
       return;
     }
     if (action === 'add-note') {

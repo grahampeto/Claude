@@ -196,7 +196,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .celebrate { text-align: center; font-size: 22px; padding: 18px; color: #3fbf7f; }
 
 /* ---------- modal ---------- */
-.modal-bg { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.6); z-index: 40; padding-top: 80px; }
+.modal-bg { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.6); z-index: 40; padding: 80px 0 40px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .modal { width: 560px; max-width: 92%; margin: 0 auto; background: #1a2130; border-radius: 20px; padding: 22px; }
 .modal h3 { margin: 0 0 16px; font-size: 24px; }
 .modal .field { margin-bottom: 12px; }
@@ -275,3 +275,11 @@ select.field { height: 50px; }
 .ring-live { position: absolute; top: 12px; right: 12px; }
 .cam-age { position: absolute; top: 16px; left: 14px; font-size: 13px; background: rgba(0,0,0,.55); padding: 3px 8px; border-radius: 8px; }
 a.btn { text-decoration: none; color: #fff; display: inline-block; }
+
+/* event editing */
+.ev.editable { cursor: pointer; }
+.ev.editable:active { opacity: .75; }
+.seg.swatches .opt { -webkit-box-flex: 0; -webkit-flex: 0 0 auto; flex: 0 0 auto; margin: 0 8px 8px 0; }
+.seg.swatches .swatch { width: 40px; height: 40px; padding: 0; border-radius: 20px; }
+.seg.swatches .swatch.on { box-shadow: 0 0 0 3px #10141c, 0 0 0 6px #fff; }
+.seg.swatches .auto { padding: 10px 14px; }
