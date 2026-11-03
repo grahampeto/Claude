@@ -77,7 +77,7 @@
         graham: { items: items(['Make bed', 'Take vitamins', 'Drink 2L water']), done: {} },
         both: { items: items(['Unload dishwasher', 'Put bins out (if bin day)', 'Lock up & alarm on']), done: {} }
       },
-      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '', google: { url: '', token: '' }, bins: { postcode: '', number: '', suffix: '' } }
+      settings: { title: 'Our Home', calendars: [], cameras: [], corsProxy: '', google: { url: '', token: '' }, bins: { postcode: '', number: '', suffix: '' }, weather: { name: 'Veldhoven', lat: 51.4183, lon: 5.4028 } }
     };
   }
   // Firebase drops empty arrays/objects and may hand arrays back as objects,
@@ -126,7 +126,8 @@
       return {
         title: v.title || d.title, calendars: arr(v.calendars), cameras: arr(v.cameras), corsProxy: v.corsProxy || '',
         google: { url: (g.url || '').replace(/\/+$/, ''), token: g.token || '' },
-        bins: { postcode: (v.bins && v.bins.postcode) || '', number: (v.bins && v.bins.number) || '', suffix: (v.bins && v.bins.suffix) || '' }
+        bins: { postcode: (v.bins && v.bins.postcode) || '', number: (v.bins && v.bins.number) || '', suffix: (v.bins && v.bins.suffix) || '' },
+        weather: v.weather && typeof v.weather.lat === 'number' ? { name: v.weather.name || '', lat: v.weather.lat, lon: v.weather.lon } : d.weather
       };
     }
     return v;
@@ -244,7 +245,7 @@
       }
       this.cache();
       if (first) this.flush();
-      if (touched.indexOf('settings') >= 0) { this.pullCalendar(); this.pullGoogle(); this.pullRing(); this.pullBins(); }
+      if (touched.indexOf('settings') >= 0) { this.pullCalendar(); this.pullGoogle(); this.pullRing(); this.pullBins(); if (typeof Weather !== 'undefined') Weather.pull(); }
       this.emit();
     },
 
@@ -254,7 +255,7 @@
       this.cache();
       this.emit();
       this.flush();
-      if (key === 'settings') { this.pullCalendar(); this.pullGoogle(); this.pullRing(); this.pullBins(); }
+      if (key === 'settings') { this.pullCalendar(); this.pullGoogle(); this.pullRing(); this.pullBins(); Weather.pull(); }
     },
     flush: function () {
       var self = this, base = this.baseUrl();
@@ -382,6 +383,68 @@
       return d;
     },
     set: function (d) { lsSet('househub.device', d); }
+  };
+
+  // ------------------------------------------------------------------ weather
+  // Open-Meteo: free, no account, and browsers may read it directly.
+  var WMO = {
+    0: ['Clear', '☀️', '🌙'], 1: ['Mostly clear', '🌤️', '🌙'], 2: ['Partly cloudy', '⛅', '☁️'], 3: ['Cloudy', '☁️', '☁️'],
+    45: ['Fog', '🌫️'], 48: ['Fog', '🌫️'], 51: ['Light drizzle', '🌦️'], 53: ['Drizzle', '🌦️'], 55: ['Heavy drizzle', '🌧️'],
+    56: ['Freezing drizzle', '🌧️'], 57: ['Freezing drizzle', '🌧️'], 61: ['Light rain', '🌦️'], 63: ['Rain', '🌧️'], 65: ['Heavy rain', '🌧️'],
+    66: ['Freezing rain', '🌧️'], 67: ['Freezing rain', '🌧️'], 71: ['Light snow', '🌨️'], 73: ['Snow', '🌨️'], 75: ['Heavy snow', '❄️'],
+    77: ['Snow grains', '🌨️'], 80: ['Showers', '🌦️'], 81: ['Showers', '🌧️'], 82: ['Heavy showers', '⛈️'], 85: ['Snow showers', '🌨️'],
+    86: ['Snow showers', '❄️'], 95: ['Thunderstorm', '⛈️'], 96: ['Thunderstorm, hail', '⛈️'], 99: ['Thunderstorm, hail', '⛈️']
+  };
+  function wmo(code, isDay) {
+    var w = WMO[code] || ['–', '🌡️'];
+    return { text: w[0], icon: isDay === 0 && w[2] ? w[2] : w[1] };
+  }
+  var Weather = {
+    data: lsGet('househub.weather', null),
+    error: '',
+    pull: function (cb) {
+      var self = this, loc = Store.data.settings.weather;
+      var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + loc.lat + '&longitude=' + loc.lon +
+        '&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m' +
+        '&hourly=precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
+        '&timezone=auto&forecast_days=3';
+      ajax('GET', url, null, function (err, res) {
+        if (err || !res || !res.current) { self.error = 'Weather unavailable'; }
+        else { self.data = res; self.data.at = Date.now(); self.error = ''; lsSet('househub.weather', res); }
+        if (cb) cb(err); else if (!current) renderHome();
+      });
+    },
+    // "Rain likely from 15:00" if the next 8 hours have a ≥60% chance.
+    rainSoon: function () {
+      var d = this.data;
+      if (!d || !d.hourly || !d.hourly.time) return '';
+      var now = new Date(), t = d.hourly.time, p = d.hourly.precipitation_probability;
+      for (var i = 0; i < t.length; i++) {
+        var at = parseISO(t[i]), hrs = (at - now) / 3600000;
+        if (hrs < -1) continue;
+        if (hrs > 8) break;
+        if (p[i] >= 60) return hrs <= 0 ? 'Rain likely now' : 'Rain likely from ' + fmtTime(at);
+      }
+      return '';
+    },
+    html: function () {
+      var d = this.data;
+      if (!d) return '<div class="w-empty muted small">' + (this.error || 'Loading weather…') + '</div>';
+      var c = d.current, now = wmo(c.weather_code, c.is_day), dl = d.daily;
+      var h = '<div class="w-now flex center"><span class="w-icon">' + now.icon + '</span>' +
+        '<span class="w-temp">' + Math.round(c.temperature_2m) + '°</span>' +
+        '<div class="w-desc"><div>' + now.text + '</div>' +
+        '<div class="muted">H ' + Math.round(dl.temperature_2m_max[0]) + '° · L ' + Math.round(dl.temperature_2m_min[0]) + '° · 💧' + (dl.precipitation_probability_max[0] || 0) + '%</div></div></div>';
+      var rain = this.rainSoon();
+      h += '<div class="w-sub">' + (rain ? '<span class="w-rain">☔ ' + rain + '</span> · ' : '') +
+        'Feels ' + Math.round(c.apparent_temperature) + '° · ' + esc(Store.data.settings.weather.name) + '</div>';
+      h += '<div class="w-days flex">';
+      for (var i = 1; i < Math.min(3, dl.time.length); i++) {
+        var w = wmo(dl.weather_code[i], 1), day = parseDay(dl.time[i]);
+        h += '<span class="w-day">' + (i === 1 ? 'Tomorrow' : DAYS[day.getDay()].slice(0, 3)) + ' ' + w.icon + ' ' + Math.round(dl.temperature_2m_max[i]) + '°/' + Math.round(dl.temperature_2m_min[i]) + '°</span>';
+      }
+      return h + '</div>';
+    }
   };
 
   // ------------------------------------------------------------------ modal
@@ -1234,6 +1297,8 @@
         '<div class="section-label">Home screen</div>' +
         '<div class="list" style="padding:16px">' +
         '<label class="lbl">Title</label><div class="flex"><input class="field grow" id="set-title" value="' + esc(s.title) + '" style="margin-right:10px"><button class="btn" data-action="set-title">Save</button></div>' +
+        '<label class="lbl" style="margin-top:12px">Weather location</label><div class="flex"><input class="field grow" id="set-weather" value="' + esc(s.weather.name) + '" placeholder="Veldhoven" style="margin-right:10px"><button class="btn" data-action="set-weather">Save</button></div>' +
+        '<div id="weather-status" class="small muted" style="margin-top:6px"></div>' +
         '<div class="row flex center" data-action="set-wall" style="padding:14px 0 0;border:0;min-height:0"><div class="check' + (dev.wall ? ' on' : '') + '" id="set-wall-check">' + (dev.wall ? '✓' : '') + '</div>' +
         '<div class="text grow">This device is the wall display<div class="meta">Goes back home after 3 idle minutes and dims 23:00–06:00. Only affects this device.</div></div></div>' +
         '</div>' +
@@ -1391,6 +1456,19 @@
         Store.setSync(cfg);
         $('set-db').value = cfg.db; $('set-key').value = cfg.key; $('set-paste').value = '';
       },
+      'set-weather': function () {
+        var name = $('set-weather').value.trim();
+        if (!name) return;
+        $('weather-status').textContent = 'Looking up ' + name + '…';
+        ajax('GET', 'https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&name=' + encodeURIComponent(name), null, function (err, res) {
+          var r = res && res.results && res.results[0];
+          if (err || !r) { $('weather-status').textContent = 'Couldn\u2019t find \u201c' + name + '\u201d – try the nearest town.'; return; }
+          Store.data.settings.weather = { name: r.name, lat: r.latitude, lon: r.longitude };
+          $('set-weather').value = r.name;
+          $('weather-status').textContent = '✓ ' + r.name + (r.admin1 ? ', ' + r.admin1 : '') + (r.country ? ', ' + r.country : '');
+          Store.save('settings');
+        });
+      },
       'set-title': function () { Store.data.settings.title = $('set-title').value.trim() || 'Our Home'; Store.save('settings'); },
       'set-google': function () {
         var url = $('g-url').value.trim().replace(/\/+$/, ''), token = $('g-token').value.trim();
@@ -1533,32 +1611,8 @@
       });
     }
 
-    // Every open to-do gets its own card (overdue / due soonest first), with
-    // a Done button so it can be ticked off from the home screen.
-    var open = Store.data.todos.filter(function (t) { return !t.done; }).sort(function (a, b) {
-      var da = a.due || '9999', db = b.due || '9999';
-      return da < db ? -1 : da > db ? 1 : (b.created || 0) - (a.created || 0);
-    });
-    var MAX_TODOS = 8;
-    open.slice(0, MAX_TODOS).forEach(function (t) {
-      var late = t.due && t.due < today, soon = t.due && t.due <= tomorrow;
-      out.push({
-        cls: late || t.due === today ? 'warn' : 'todo', icon: late ? '⚠️' : '✅', app: 'todo', tick: t.id, whoHtml: whoTag(t.who), title: t.text,
-        sub: t.due ? (late ? 'Overdue – was due ' : 'Due ') + fmtDayShort(t.due).replace(/^(Today|Tomorrow|Yesterday)$/, function (x) { return x.toLowerCase(); }) : (soon ? '' : 'To-do')
-      });
-    });
-    if (open.length > MAX_TODOS) out.push({ cls: 'todo', icon: '✅', app: 'todo', title: '+ ' + (open.length - MAX_TODOS) + ' more task' + (open.length - MAX_TODOS > 1 ? 's' : ''), sub: 'Tap to see the full list' });
-
-    // Evening nudge for unfinished checklists.
-    if (now.getHours() >= 18) {
-      LISTS.forEach(function (l) {
-        var p = checklistProgress(l[0]);
-        if (p.total && p.done < p.total) out.push({ cls: 'pink', icon: '📋', app: 'checklists', who: l[0], title: l[1] + ': ' + (p.total - p.done) + ' checklist item' + (p.total - p.done > 1 ? 's' : '') + ' left', sub: 'Tap to finish today’s list' });
-      });
-    }
-
-    var gi = groc().items.filter(function (i) { return !i.done; });
-    if (gi.length) out.push({ cls: 'ok', icon: '🛒', app: 'groceries', title: gi.length + ' item' + (gi.length > 1 ? 's' : '') + ' on the shopping list', sub: gi.slice(0, 6).map(function (i) { return i.name + qtyLabel(i); }).join(', ') });
+    // To-dos live on the people cards and groceries have a dock badge, so
+    // notifications are only for things that pop up.
     return out;
   }
 
@@ -1571,12 +1625,34 @@
       s.textContent = Store.online ? (Object.keys(Store.dirty).length ? '● Syncing…' : '● Synced') : '● Offline – saved on this device';
     }
 
+    $('weather').innerHTML = Weather.html();
+
+    // One card per person: checklist progress, then their open to-dos.
+    var todayK = dayKey(), MAX = 3;
     $('progress').innerHTML = LISTS.map(function (l) {
       var p = checklistProgress(l[0]);
       var pct = p.total ? Math.round(100 * p.done / p.total) : 0;
-      return '<button class="progress-card grow" data-action="open" data-app="checklists" data-who="' + l[0] + '" style="text-align:left">' +
-        '<div class="flex between"><span class="name">' + l[1] + '</span><span class="muted">' + p.done + '/' + p.total + (p.total && p.done === p.total ? ' 🎉' : '') + '</span></div>' +
-        '<div class="bar"><div style="width:' + pct + '%"></div></div></button>';
+      var todos = Store.data.todos.filter(function (t) { return !t.done && t.who === l[0]; }).sort(function (a, b) {
+        var da = a.due || '9999', db = b.due || '9999';
+        return da < db ? -1 : da > db ? 1 : (a.created || 0) - (b.created || 0);
+      });
+      var h = '<div class="person grow">' +
+        '<div class="person-head" data-action="open" data-app="checklists" data-who="' + l[0] + '">' +
+        '<div class="flex between center"><span class="name">' + l[1] + '</span>' +
+        '<span class="muted small">Checklist ' + p.done + '/' + p.total + (p.total && p.done === p.total ? ' 🎉' : '') + '</span></div>' +
+        '<div class="bar"><div style="width:' + pct + '%"></div></div></div>' +
+        '<div class="person-todos">';
+      if (!todos.length) h += '<div class="pt-empty muted small">No to-dos 🎉</div>';
+      todos.slice(0, MAX).forEach(function (t) {
+        var late = t.due && t.due < todayK;
+        h += '<div class="pt flex center">' +
+          '<button class="pt-check" data-action="home-todo-done" data-id="' + t.id + '" aria-label="Done"></button>' +
+          '<div class="pt-text grow" data-action="open" data-app="todo" data-who="' + l[0] + '">' + esc(t.text) +
+          (t.due ? ' <span class="pt-due' + (late ? ' overdue' : '') + '">' + (late ? 'overdue' : fmtDayShort(t.due).toLowerCase()) + '</span>' : '') + '</div></div>';
+      });
+      if (todos.length > MAX) h += '<div class="pt-more small" data-action="open" data-app="todo" data-who="' + l[0] + '">+ ' + (todos.length - MAX) + ' more</div>';
+      h += '</div><button class="pt-add small" data-action="home-todo-add" data-who="' + l[0] + '">+ Add to-do</button></div>';
+      return h;
     }).join('');
 
     var list = notifications();
@@ -1619,6 +1695,7 @@
     if (current && Apps[current].leave) Apps[current].leave();
     current = name;
     if (opts && opts.who && name === 'checklists') { app.who = opts.who; app.editing = false; }
+    if (opts && opts.who && name === 'todo') app.filter = opts.who;
     if (app.enter) app.enter();
     $('panel-title').textContent = app.title;
     $('panel-actions').innerHTML = app.headerActions || '';
@@ -1671,6 +1748,9 @@
           Store.data.notes.unshift({ id: uid(), text: text, who: Modal.seg('who'), at: Date.now() });
           Store.save('notes');
         }, 'Post');
+    }
+    if (action === 'home-todo-add') {
+      return Apps.todo.editor({ text: '', who: el.getAttribute('data-who') });
     }
     if (action === 'home-todo-done') {
       var tid = el.getAttribute('data-id');
@@ -1753,6 +1833,8 @@
 
   tickClock();
   Store.init();
+  Weather.pull();
+  setInterval(function () { Weather.pull(); }, 15 * 60000);
 
   // Setup link from another device: #join=<{"db":..,"key":..}>
   function checkJoin() {

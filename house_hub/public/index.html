@@ -18,10 +18,11 @@
 
 <div id="home" class="screen flex col">
   <div class="home-top flex between">
-    <div>
+    <div class="top-left">
       <div class="clock" id="clock">--:--</div>
       <div class="date" id="date"></div>
     </div>
+    <div class="weather grow" id="weather"></div>
     <div class="home-title">
       <div class="flex center" style="-webkit-box-pack:end;-webkit-justify-content:flex-end;justify-content:flex-end">
         <h1 id="title">Our Home</h1>
@@ -31,14 +32,16 @@
     </div>
   </div>
 
-  <div class="section-label">Today's checklists</div>
-  <div class="progress-row flex" id="progress"></div>
+  <div class="home-main grow">
+    <div class="section-label">To-dos &amp; checklists</div>
+    <div class="people flex" id="progress"></div>
 
-  <div class="flex between center">
-    <div class="section-label">Notifications</div>
-    <button class="btn small" data-action="add-note">+ Leave a note</button>
+    <div class="flex between center">
+      <div class="section-label">Notifications</div>
+      <button class="btn small" data-action="add-note">+ Leave a note</button>
+    </div>
+    <div class="notifications" id="notifications"></div>
   </div>
-  <div class="notifications grow" id="notifications"></div>
 
   <div class="dock flex">
     <button class="app-btn" data-action="open" data-app="calendar"><div class="tile img"><img src="icons/calendar.svg" alt=""><span class="badge hidden" id="badge-calendar"></span></div><div class="label">Calendar</div></button>

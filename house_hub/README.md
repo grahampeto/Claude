@@ -15,12 +15,9 @@ and big buttons along the bottom for the sub-apps:
 | 📹 **Cameras** | Live LSC garage camera and Ring doorbell snapshots, both through the cloud, so nothing extra runs at home. Doorbell presses show on the home screen. |
 | 📋 **Daily Checklist** | Separate lists for Jess, Graham and Together. They reset every day and show the last 7 days. Tap **Edit list** to change the items. |
 
-**Notifications** come from:
-- notes you leave each other (**+ Leave a note**)
-- what's on today and tomorrow
-- **every open to-do**, overdue first, with a ✓ Done button
-- unfinished checklists after 6pm
-- how many items are on the shopping list
+**Home screen:** the clock is at the top left, and the **live weather** (Open-Meteo, free, no account; set the town in ⚙️ Settings) is in the middle. Below that is a card for **Jess, Graham and Together**. Each card shows that person's checklist progress and their open **to-dos**, which you can tick off or add right there.
+
+**Notifications** are kept for things that pop up: doorbell rings, today's and tomorrow's calendar events, bin days, notes you leave each other (**+ Leave a note**), and a low doorbell battery.
 
 **Wall display mode** is on by default on tablets and off on phones. You can change it
 for each device in ⚙️ Settings. With it on, the app goes back to the home screen after
