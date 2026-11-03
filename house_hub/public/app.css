@@ -288,3 +288,7 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
 /* picture icons on the dock */
 .app-btn .tile.img { background: none; box-shadow: none; line-height: 0; }
 .app-btn .tile.img img { width: 100%; height: 100%; display: block; -webkit-filter: drop-shadow(0 6px 10px rgba(0,0,0,.45)); filter: drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
+/* vector icons: a bit smaller than the old emoji tiles */
+.app-btn .tile.img { width: 78px; height: 78px; margin-bottom: 6px; }
+@media (max-width: 800px) { .app-btn .tile.img { width: 70px; height: 70px; } }
+@media (max-width: 600px) { .app-btn .tile.img { width: 50px; height: 50px; } }

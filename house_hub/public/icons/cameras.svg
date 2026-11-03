@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <clipPath id="tile"><rect x="2" y="2" width="124" height="124" rx="28"/></clipPath>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3b3d"/><stop offset="1" stop-color="#202123"/></linearGradient>
+    <linearGradient id="tan" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ad8459"/><stop offset="1" stop-color="#7f5c3a"/></linearGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="1.7" numOctaves="2" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .22 0"/><feComposite in2="SourceGraphic" operator="in"/></filter>
+    <linearGradient id="bronze" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8a6a45"/><stop offset=".45" stop-color="#e3c9a2"/><stop offset="1" stop-color="#7b5c3a"/></linearGradient>
+    <radialGradient id="headg" cx=".38" cy=".3" r=".8"><stop offset="0" stop-color="#ead4b0"/><stop offset=".6" stop-color="#b08a5e"/><stop offset="1" stop-color="#6e5134"/></radialGradient>
+    <radialGradient id="lens" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#5fb4d6"/><stop offset=".35" stop-color="#16324a"/><stop offset="1" stop-color="#05080b"/></radialGradient>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect x="0" y="0" width="128" height="58" fill="url(#top)"/>
+    <rect x="0" y="58" width="128" height="70" fill="url(#tan)"/>
+    <rect x="0" y="0" width="128" height="128" fill="#000" filter="url(#grain)"/>
+    <path d="M0 58h128" stroke="#e7cfa9" stroke-opacity=".6" stroke-dasharray="3 3"/>
+  </g>
+  <!-- wall plate + arm -->
+  <rect x="16" y="68" width="15" height="38" rx="3" fill="url(#bronze)"/>
+  <rect x="16" y="68" width="15" height="38" rx="3" fill="none" stroke="#5e4429" stroke-opacity=".5"/>
+  <path d="M28 84h22v11H28z" fill="url(#bronze)"/>
+  <!-- dome hood -->
+  <path d="M36 54c0-17 14-27 32-27s32 10 32 27v4c-8 5-19 7-32 7s-24-2-32-7z" fill="url(#bronze)"/>
+  <path d="M46 40c5-6 13-9 22-9" stroke="#fbeed8" stroke-opacity=".7" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <ellipse cx="68" cy="60" rx="31" ry="6" fill="#1b1c1e"/>
+  <!-- camera head -->
+  <circle cx="68" cy="82" r="22" fill="url(#headg)"/>
+  <circle cx="68" cy="83" r="15" fill="#141517"/>
+  <g fill="#3c3e42">
+    <circle cx="68" cy="71" r="1.7"/><circle cx="76.5" cy="74.5" r="1.7"/><circle cx="80" cy="83" r="1.7"/><circle cx="76.5" cy="91.5" r="1.7"/>
+    <circle cx="68" cy="95" r="1.7"/><circle cx="59.5" cy="91.5" r="1.7"/><circle cx="56" cy="83" r="1.7"/><circle cx="59.5" cy="74.5" r="1.7"/>
+  </g>
+  <circle cx="68" cy="83" r="8.5" fill="url(#lens)" stroke="#2c2e31" stroke-width="2"/>
+  <circle cx="65.2" cy="80.2" r="2.3" fill="#fff" opacity=".85"/>
+</svg>
