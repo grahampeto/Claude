@@ -24,7 +24,6 @@
     </div>
     <div class="weather" id="weather" data-action="open" data-app="weather"></div>
     <div class="home-title flex center">
-      <div><h1 id="title">Our Home</h1><div class="sync" id="sync"></div></div>
       <button class="gear" data-action="open" data-app="settings" aria-label="Settings">⚙️</button>
     </div>
   </div>
@@ -36,7 +35,7 @@
         <div class="pc-body grow" id="agenda"></div>
       </section>
       <section class="panel-card p-todos flex col">
-        <div class="pc-title flex between center"><span>To-dos</span><span class="pc-link" data-action="open" data-app="todo">Full list ›</span></div>
+        <div class="pc-title flex between center"><span>To-dos</span></div>
         <div class="pc-body grow flex todo-cols" id="home-todos"></div>
       </section>
     </div>
@@ -49,7 +48,7 @@
         <div class="pc-title">Quick utilities</div>
         <div class="pc-body grow utils flex">
           <div class="util-groc flex col">
-            <div class="ug-head flex between center"><span class="util-label">🛒 Grocery list</span><span class="pc-link" data-action="open" data-app="groceries">Open ›</span></div>
+            <button class="ug-head flex between center" data-action="open" data-app="groceries"><span class="util-label">🛒 Grocery list</span><span class="ug-count muted small" id="groc-count"></span><span class="ug-open">›</span></button>
             <div class="ug-list grow" id="home-groc"></div>
             <form class="ug-add flex" data-form="home-groc-add"><input class="field grow" id="home-groc-input" placeholder="Add an item…" autocomplete="off"><button class="btn primary small" type="submit">Add</button></form>
           </div>
@@ -59,12 +58,6 @@
     </div>
   </div>
 
-  <div class="dock flex">
-    <button class="app-btn" data-action="open" data-app="calendar"><div class="tile img"><img src="icons/calendar.svg" alt=""><span class="badge hidden" id="badge-calendar"></span></div><div class="label">Calendar</div></button>
-    <button class="app-btn" data-action="open" data-app="groceries"><div class="tile img"><img src="icons/groceries.svg" alt=""><span class="badge hidden" id="badge-groceries"></span></div><div class="label">Groceries</div></button>
-    <button class="app-btn" data-action="open" data-app="cameras"><div class="tile img"><img src="icons/cameras.svg" alt=""></div><div class="label">Cameras</div></button>
-    <button class="app-btn" data-action="open" data-app="settings"><div class="tile img"><img src="icons/settings.svg" alt=""></div><div class="label">Settings</div></button>
-  </div>
 </div>
 
 <div id="panel" class="screen flex col hidden">

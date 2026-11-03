@@ -545,3 +545,19 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
   .tcol, .util-groc { display: block; }
   .tcol .tcol-list, .util-groc .ug-list { -webkit-box-flex: 0; -webkit-flex: none; flex: none; overflow: visible; max-height: none; }
 }
+
+/* v3.2: no dock, no title; coloured name tags; touch-scroll without bars */
+#home { padding-bottom: 16px; }
+.home-grid > .grid-row:last-child { margin-bottom: 0; }
+.home-title { min-width: 220px; }
+.home-title .gear { font-size: 30px; margin-left: 0; padding: 8px; }
+.tcol-name { font-size: 17px; padding: 4px 14px; border-radius: 12px; margin: 0; }
+.ug-head { width: 100%; text-align: left; padding: 2px 0 6px; border-bottom: 1px solid #2f3a50; margin-bottom: 4px; }
+.ug-head .util-label { -webkit-box-flex: 1; -webkit-flex: 1 1 auto; flex: 1 1 auto; }
+.ug-count { margin-right: 8px; }
+.ug-open { font-size: 22px; color: #6ea0ff; line-height: 1; }
+.ug-head:active { opacity: .7; }
+/* scroll by swiping, no visible scroll bars */
+.pc-body, .ug-list, .tcol-list { scrollbar-width: none; -ms-overflow-style: none; }
+.pc-body::-webkit-scrollbar, .ug-list::-webkit-scrollbar, .tcol-list::-webkit-scrollbar { display: none; width: 0; height: 0; }
+@media (max-width: 600px) { #home { padding-bottom: 12px; } .home-title { min-width: 0; } }

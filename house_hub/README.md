@@ -15,12 +15,13 @@ and big buttons along the bottom for the sub-apps:
 | 📹 **Cameras** | Live LSC garage camera and Ring doorbell snapshots, both through the cloud, so nothing extra runs at home. Doorbell presses show on the home screen. |
 
 **Home screen (tablet layout):**
-- **Header:** clock and date, the live weather in the middle (tap it for a 14-day forecast), and the title with ⚙️.
+- **Header:** clock and date, the live weather in the middle (tap it for a 14-day forecast), and ⚙️ for Settings.
 - **Today's agenda:** everything in today's calendar (finished events are dimmed), plus doorbell-ring, low-battery and bin-day alerts. Tap the panel to open the calendar.
-- **To-dos:** a column each for **Jess** and **Graham** (to-dos marked for the home screen). Tick to finish, tap to edit, *+ Add to-do*. *Full list ›* shows everything, including Together, list-only and done items.
+- **To-dos:** a colour-coded column each for **Jess** and **Graham** (to-dos marked for the home screen). Tick to finish, tap to edit, *+ Add to-do*. Tap a name for the full list, including Together, list-only and done items.
 - **Pinned family notes:** notes for everyone. *+ Note* to pin one, ✕ to unpin.
-- **Quick utilities:** the **grocery list** (tick to remove, add items inline) and a **Camera snap** pop-up.
-- **Dock:** Calendar, Groceries, Cameras and Settings.
+- **Quick utilities:** the **grocery list** (swipe to scroll, tick to remove, add items inline; tap its heading for the full Groceries screen) and a **Camera snap** pop-up (with a button to the Cameras screen).
+
+There's no dock: Calendar, Groceries, Cameras and Settings are all reached from the panels and ⚙️.
 
 On phones the panels stack and the page scrolls.
 

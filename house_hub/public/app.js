@@ -1635,14 +1635,6 @@
   // ---- Home screen ----------------------------------------------------------
 
   function renderHome() {
-    $('title').textContent = Store.data.settings.title;
-    var s = $('sync');
-    if (!Store.sync) { s.className = 'sync muted'; s.textContent = 'This device only'; }
-    else {
-      s.className = 'sync ' + (Store.online ? 'ok' : 'bad');
-      s.textContent = Store.online ? (Object.keys(Store.dirty).length ? '● Syncing…' : '● Synced') : '● Offline – saved on this device';
-    }
-
     $('weather').innerHTML = Weather.html();
 
     // Agenda & meals
@@ -1663,7 +1655,7 @@
         return da < db ? -1 : da > db ? 1 : (a.created || 0) - (b.created || 0);
       });
       var h = '<div class="tcol grow flex col"><div class="tcol-head flex between center" data-action="open" data-app="todo" data-who="' + l[0] + '">' +
-        '<span class="name">' + l[1] + '</span><span class="muted small">' + (todos.length || '') + ' ›</span></div><div class="tcol-list grow">';
+        '<span class="who who-' + l[0] + ' tcol-name">' + l[1] + '</span><span class="muted small">' + (todos.length || '') + ' ›</span></div><div class="tcol-list grow">';
       if (!todos.length) h += '<div class="pt-empty muted small">No to-dos 🎉</div>';
       todos.slice(0, MAXT).forEach(function (t) {
         var late = t.due && t.due < todayK;
@@ -1691,6 +1683,7 @@
       return '<div class="ug-item flex center" data-action="home-groc-tick" data-id="' + i.id + '">' +
         '<span class="pt-check"></span><span class="grow">' + esc(i.name) + (i.qty > 1 ? ' <span class="qty">\u00d7' + i.qty + '</span>' : '') + '</span></div>';
     }).join('') : '<div class="pt-empty muted small">The list is empty 🎉</div>';
+    $('groc-count').textContent = gi.length ? gi.length + ' item' + (gi.length > 1 ? 's' : '') : '';
     var nc = cameras().length;
     $('snap-sub').textContent = nc ? nc + ' camera' + (nc > 1 ? 's' : '') : 'Set up in Settings';
 
