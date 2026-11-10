@@ -217,7 +217,7 @@ fieldset.seg input { width: auto; }
     <div class="dialog-actions">
       <button type="button" class="link danger" id="btnDeleteMed" style="margin-right:auto">Delete</button>
       <button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary">Save</button>
+      <button type="button" class="primary" data-save>Save</button>
     </div>
   </form>
 </dialog>
@@ -239,7 +239,7 @@ fieldset.seg input { width: auto; }
     <div class="dialog-actions">
       <button type="button" class="link" id="btnDoseCounts" style="margin-right:auto">Edit pill counts</button>
       <button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary">Save</button>
+      <button type="button" class="primary" data-save>Save</button>
     </div>
   </form>
 </dialog>
@@ -253,7 +253,7 @@ fieldset.seg input { width: auto; }
     <div id="pickupRows"></div>
     <div class="dialog-actions">
       <button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary">Restock</button>
+      <button type="button" class="primary" data-save>Restock</button>
     </div>
   </form>
 </dialog>
@@ -269,7 +269,7 @@ fieldset.seg input { width: auto; }
     <div class="dialog-actions">
       <button type="button" class="link" id="btnFillAdjust" style="margin-right:auto">Adjust amounts</button>
       <button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary">Remove from stock</button>
+      <button type="button" class="primary" data-save>Remove from stock</button>
     </div>
   </form>
 </dialog>
@@ -280,7 +280,7 @@ fieldset.seg input { width: auto; }
     <p id="confirmText" style="margin-top:0"></p>
     <div class="dialog-actions">
       <button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary" id="confirmOk">Yes</button>
+      <button type="button" class="primary" data-save id="confirmOk">Yes</button>
     </div>
   </form>
 </dialog>
@@ -323,7 +323,19 @@ function ask(text, okLabel = "Yes") {
     dlg.returnValue = ""; dlg.addEventListener("close", onClose); dlg.showModal();
   });
 }
-$("formConfirm").addEventListener("submit", e => { e.preventDefault(); $("dlgConfirm").close("ok"); });
+// The viewer runs this page in a frame that can block form submission, which made Save buttons
+// do nothing. So each pop-up's Save is a plain button that runs its save directly; Enter in a
+// field does the same.
+function onSave(formId, fn) {
+  const form = $(formId), btn = form.querySelector("[data-save]");
+  const run = () => fn({ preventDefault() {} });
+  btn.addEventListener("click", run);
+  form.addEventListener("submit", e => e.preventDefault());
+  form.addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.target.tagName === "INPUT" && e.target.type !== "radio") { e.preventDefault(); run(); }
+  });
+}
+onSave("formConfirm", e => { e.preventDefault(); $("dlgConfirm").close("ok"); });
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
 
 // ---------- tabs ----------
@@ -599,7 +611,7 @@ function openDose(id) {
   $("dlgDose").showModal();
 }
 $("btnDoseCounts").onclick = () => { $("dlgDose").close(); openMed(doseMed.id); };
-$("formDose").addEventListener("submit", e => {
+onSave("formDose", e => {
   e.preventDefault();
   const m = doseMed, today = todayISO();
   const amt = +$("dAmount").value, st = document.querySelector('input[name="dStatus"]:checked').value, was = statusOf(m);
@@ -648,7 +660,7 @@ $("btnDeleteMed").onclick = async () => {
   state.meds = state.meds.filter(x => x.id !== m.id);
   save(); toast(`Deleted ${m.name}`);
 };
-$("formMed").addEventListener("submit", e => {
+onSave("formMed", e => {
   e.preventDefault();
   const name = $("mName").value.trim(), perWeek = +$("mPerWeek").value,
         stock = $("mStock").value === "" ? NaN : +$("mStock").value, disp = +$("mDisp").value || 0;
@@ -683,7 +695,7 @@ $("btnPickup").onclick = () => {
   $("dlgPickup").showModal();
   const first = document.querySelector("#pickupRows input"); if (first) first.focus();
 };
-$("formPickup").addEventListener("submit", e => {
+onSave("formPickup", e => {
   e.preventDefault();
   const got = state.meds.map(m => [m, Math.max(0, +$("pk_" + m.id).value || 0)]).filter(([, q]) => q > 0);
   $("dlgPickup").close();
@@ -718,7 +730,7 @@ function checkFill() {
   $("fillErr").textContent = short.length ? `Not enough loose pills for: ${short.join(", ")}. If you collected more, log the pickup first.` : "";
 }
 $("fillRows").addEventListener("input", checkFill);
-$("formFill").addEventListener("submit", e => {
+onSave("formFill", e => {
   e.preventDefault();
   const date = $("fDate").value || todayISO();
   const days = state.settings.fillDays;
