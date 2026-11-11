@@ -193,7 +193,7 @@ fieldset.seg input { width: auto; }
         <button id="btnImport">Import backup</button>
         <input id="fileImport" type="file" accept="application/json,.json" hidden>
       </div>
-      <p class="muted" style="margin:12px 0 0;font-size:.75rem">App version 13</p>
+      <p class="muted" style="margin:12px 0 0;font-size:.75rem">App version 14</p>
     </section>
   </div>
 </main>
@@ -369,6 +369,8 @@ window.addEventListener("hashchange", showTab);
 //   carry  = part-pill owed (+) or ahead (−) for doses that don't divide into whole pills per fill
 function blank() { return { meds: [], history: [], settings: { horizonWeeks: 5, fillDays: 14, apptDate: "" } }; }
 function normalize(s) {
+  // Data from your Claude account arrives locked (read-only), so work on a full editable copy.
+  s = JSON.parse(JSON.stringify(s || {}));
   const out = { ...blank(), ...s, settings: { ...blank().settings, ...(s && s.settings) } };
   out.meds = (out.meds || []).map(m => ({ active: true, carry: 0, ...m, perWeek: m.perWeek != null ? m.perWeek : (m.perDay || 1) * 7 }));
   out.meds.forEach(m => delete m.perDay);
