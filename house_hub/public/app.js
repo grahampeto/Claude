@@ -1765,16 +1765,24 @@
       if (d.battery != null && d.battery <= 20) out.push({ cls: 'alert', icon: '🔋', text: d.name + ' battery ' + d.battery + '% – charge it' });
     });
 
-    var binsTomorrow = binsOn(tomorrow);
-    function short(p) { return { gft: 'GFT', pmd: 'PMD', restafval: 'Restafval', papier: 'Paper', glas: 'Glass', textiel: 'Textiles' }[p.type] || binLabel(p); }
-    if (binsTomorrow.length) out.push({ cls: 'bin', icon: '🗑️', text: 'Bins tomorrow: ' + binsTomorrow.map(short).join(' + '), sub: now.getHours() >= 12 ? 'Put it out tonight' : '' });
+    return out.concat(dayItems(now, false));
+  }
 
-    var todays = eventsOn(allEvents(), now);
-    todays.forEach(function (e) {
-      var over = !e.allDay && (e.end || e.start) < now;
+  // One day's calendar (bin days highlighted). Used for today and tomorrow.
+  function dayItems(day, isTomorrow) {
+    var out = [], now = new Date();
+    function short(p) { return { gft: 'GFT', pmd: 'PMD', restafval: 'Restafval', papier: 'Paper', glas: 'Glass', textiel: 'Textiles' }[p.type] || binLabel(p); }
+    var bins = binsOn(dayKey(day));
+    if (bins.length) {
+      out.push({ cls: 'bin', icon: '🗑️', text: 'Bins: ' + bins.map(short).join(' + '),
+        sub: isTomorrow ? (now.getHours() >= 12 ? 'Put it out tonight' : '') : (now.getHours() < 12 ? 'Collected today' : '') });
+    }
+    var evs = eventsOn(allEvents(), day).filter(function (e) { return !e.bin; });
+    evs.forEach(function (e) {
+      var over = !isTomorrow && !e.allDay && (e.end || e.start) < now;
       out.push({ cls: 'event' + (over ? ' past' : ''), dot: eventColor(e), time: e.allDay ? 'All day' : fmtTime(e.start) + (e.end ? '–' + fmtTime(e.end) : ''), text: e.title, whoHtml: e.who ? whoTag(e.who) : '' });
     });
-    if (!todays.length) out.push({ cls: 'muted-item', text: 'Nothing in the calendar today' });
+    if (!evs.length && !bins.length) out.push({ cls: 'muted-item', text: isTomorrow ? 'Nothing planned tomorrow' : 'Nothing in the calendar today' });
     return out;
   }
 
@@ -2012,14 +2020,18 @@
     $('weather').innerHTML = Weather.html();
 
     // Agenda & meals
-    $('agenda').innerHTML = agendaItems().map(function (n) {
+    function agendaHtml(items) { return items.map(function (n) {
       if (n.cls === 'subhead') return '<div class="ag-sub">' + esc(n.text) + '</div>';
       var act = n.action === 'dinner' ? ' data-action="dinner" data-day="' + n.day + '"' : n.app ? ' data-action="open" data-app="' + n.app + '"' : '';
       return '<div class="ag-item flex center ' + n.cls + '"' + act + '>' +
         (n.dot ? '<span class="ag-dot" style="background:' + esc(n.dot) + '"></span>' : '<span class="ag-icon">' + (n.icon || '•') + '</span>') +
         '<div class="grow">' + (n.time ? '<span class="ag-time">' + n.time + '</span> ' : '') + (n.whoHtml || '') + esc(n.text) +
         (n.sub ? '<div class="ag-subtext">' + esc(n.sub) + '</div>' : '') + '</div></div>';
-    }).join('');
+    }).join(''); }
+    $('agenda').innerHTML = agendaHtml(agendaItems());
+    var tomorrowDate = addDays(new Date(), 1);
+    $('agenda-tom').innerHTML = agendaHtml(dayItems(tomorrowDate, true));
+    $('ag-tom-head').textContent = 'Tomorrow · ' + DAYS[tomorrowDate.getDay()];
 
     // To-dos: a column each for Jess and Graham (home-screen ones only).
     var todayK = dayKey(), MAXT = 6;

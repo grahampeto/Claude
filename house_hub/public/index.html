@@ -31,8 +31,11 @@
   <div class="home-grid grow flex col">
     <div class="grid-row flex">
       <section class="panel-card p-agenda flex col" data-action="open" data-app="calendar">
-        <div class="pc-title flex between center"><span>Today’s agenda</span><span class="pc-link">Calendar ›</span></div>
-        <div class="pc-body grow" id="agenda"></div>
+        <div class="pc-title flex between center"><span>Agenda</span><span class="pc-link">Calendar ›</span></div>
+        <div class="pc-body grow agenda-split flex col">
+          <div class="ag-half grow flex col"><div class="ag-head">Today</div><div class="ag-scroll grow" id="agenda"></div></div>
+          <div class="ag-half grow flex col"><div class="ag-head" id="ag-tom-head">Tomorrow</div><div class="ag-scroll grow" id="agenda-tom"></div></div>
+        </div>
       </section>
       <section class="panel-card p-todos flex col">
         <div class="pc-title flex between center"><span>To-dos</span></div>

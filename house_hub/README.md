@@ -16,7 +16,7 @@ and big buttons along the bottom for the sub-apps:
 
 **Home screen (tablet layout):**
 - **Header:** clock and date, the live weather in the middle (tap it for a 14-day forecast), and ⚙️ for Settings.
-- **Today's agenda:** everything in today's calendar (finished events are dimmed), plus doorbell-ring, low-battery and bin-day alerts. Tap the panel to open the calendar.
+- **Agenda:** today's calendar on top (finished events dimmed, plus doorbell-ring and low-battery alerts) and tomorrow's below, with bin days highlighted ("Put it out tonight" from noon). Tap the panel to open the calendar.
 - **To-dos:** a colour-coded column each for **Jess** and **Graham** (to-dos marked for the home screen). Tick to finish, tap to edit, *+ Add to-do*. Tap a name for the full list, including Together, list-only and done items.
 - **Cameras:** the doorbell's latest snapshot (refreshed every 5 minutes, no live stream) and the garage camera. Tap the panel for live view of both side by side.
 - **Groceries:** the shopping list. Swipe to scroll, tick to remove, add items at the bottom, and tap *Groceries ›* for the full screen with meals.

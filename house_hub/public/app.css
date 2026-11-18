@@ -645,3 +645,15 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
   .p-cams .cam-tiles { height: 150px; }
   .p-groc .ug-list { -webkit-box-flex: 0; -webkit-flex: none; flex: none; max-height: none; overflow: visible; }
 }
+
+/* agenda split: today on top, tomorrow below */
+.agenda-split { overflow: hidden; }
+.ag-half { min-height: 0; }
+.ag-half + .ag-half { border-top: 1px solid #2a3346; margin-top: 6px; padding-top: 6px; }
+.ag-head { font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase; color: #6ea0ff; font-weight: 700; margin-bottom: 2px; }
+.ag-scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; scrollbar-width: none; }
+.ag-scroll::-webkit-scrollbar { display: none; width: 0; }
+@media (max-width: 600px) {
+  .agenda-split, .ag-half { display: block; }
+  .ag-half .ag-scroll { -webkit-box-flex: 0; -webkit-flex: none; flex: none; overflow: visible; }
+}
