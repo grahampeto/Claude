@@ -1990,6 +1990,22 @@
   setInterval(function () { DoorWatch.tick(); }, 10000);
   setTimeout(function () { DoorWatch.tick(); }, 2000);
 
+  // ---- Doorbell thumbnail on the home screen ---------------------------------
+  // Ring's stored snapshot (doesn't wake the doorbell); refreshed every 5 min.
+  function refreshHomeSnap() {
+    var ring = cameras().filter(function (c) { return c.type === 'ring'; })[0];
+    var img = $('home-snap'), empty = $('home-snap-empty');
+    if (!ring || !Store.workerOn() || document.hidden) {
+      if (!ring) { img.style.display = 'none'; empty.style.display = ''; }
+      return;
+    }
+    var next = new Image();
+    next.onload = function () { img.src = next.src; img.style.display = ''; empty.style.display = 'none'; };
+    next.src = ring.url + '&_=' + Date.now();
+  }
+  setTimeout(refreshHomeSnap, 1500);
+  setInterval(refreshHomeSnap, 5 * 60000);
+
   // ---- Home screen ----------------------------------------------------------
 
   function renderHome() {
@@ -2026,24 +2042,15 @@
       return h + '</div><button class="pt-add" data-action="home-todo-add" data-who="' + l[0] + '">+ Add to-do</button></div>';
     }).join('');
 
-    // Pinned notes
-    var notes = Store.data.notes;
-    $('notes').innerHTML = notes.length ? notes.map(function (n) {
-      return '<div class="note flex">' +
-        '<span class="note-pin">📌</span><div class="grow"><div class="note-text">“' + esc(n.text) + '”</div>' +
-        '<div class="note-meta muted small">' + (WHO[n.who] ? WHO[n.who].label + ' · ' : '') + fmtDayShort(dayKey(new Date(n.at))) + '</div></div>' +
-        '<button class="x" data-action="dismiss-note" data-id="' + n.id + '" aria-label="Unpin">✕</button></div>';
-    }).join('') : '<div class="pt-empty muted">No notes. Tap “+ Note” to pin one for everyone.</div>';
-
     // Quick utilities: grocery list (tick to remove, add inline) + camera snap.
     var gi = groc().items.slice().sort(function (a, b) { return a.added - b.added; });
     $('home-groc').innerHTML = gi.length ? gi.map(function (i) {
       return '<div class="ug-item flex center" data-action="home-groc-tick" data-id="' + i.id + '">' +
         '<span class="pt-check"></span><span class="grow">' + esc(i.name) + (i.qty > 1 ? ' <span class="qty">\u00d7' + i.qty + '</span>' : '') + '</span></div>';
     }).join('') : '<div class="pt-empty muted small">The list is empty 🎉</div>';
-    $('groc-count').textContent = gi.length ? gi.length + ' item' + (gi.length > 1 ? 's' : '') : '';
-    var nc = cameras().length;
-    $('snap-sub').textContent = 'Doorbell + garage';
+    $('groc-count').textContent = gi.length ? '· ' + gi.length : '';
+    var garage = cameras().filter(function (c) { return c.type !== 'ring'; })[0];
+    $('home-garage-name').textContent = garage ? garage.name : 'Garage (not set up)';
 
     // Badges on dock buttons.
     setBadge('calendar', eventsOn(allEvents(), new Date()).length);

@@ -40,20 +40,17 @@
       </section>
     </div>
     <div class="grid-row flex">
-      <section class="panel-card p-notes flex col">
-        <div class="pc-title flex between center"><span>Pinned family notes</span><button class="btn small" data-action="add-note">+ Note</button></div>
-        <div class="pc-body grow" id="notes"></div>
-      </section>
-      <section class="panel-card p-utils flex col">
-        <div class="pc-title">Quick utilities</div>
-        <div class="pc-body grow utils flex">
-          <div class="util-groc flex col">
-            <button class="ug-head flex between center" data-action="open" data-app="groceries"><span class="util-label">🛒 Grocery list</span><span class="ug-count muted small" id="groc-count"></span><span class="ug-open">›</span></button>
-            <div class="ug-list grow" id="home-groc"></div>
-            <form class="ug-add flex" data-form="home-groc-add"><input class="field grow" id="home-groc-input" placeholder="Add an item…" autocomplete="off"><button class="btn primary small" type="submit">Add</button></form>
-          </div>
-          <button class="util util-snap" data-action="util-snap"><span class="util-icon">📷</span><span class="util-label">Cameras</span><span class="util-live">● Live view</span><span class="util-sub muted small" id="snap-sub"></span></button>
+      <section class="panel-card p-cams flex col" data-action="util-snap">
+        <div class="pc-title flex between center"><span>Cameras</span><span class="pc-link live-link">● Live view ›</span></div>
+        <div class="pc-body grow cam-tiles flex">
+          <div class="cam-thumb grow"><img id="home-snap" alt=""><div class="ct-empty" id="home-snap-empty">🔔</div><div class="ct-name">Doorbell</div></div>
+          <div class="cam-thumb grow"><div class="ct-empty" id="home-garage-empty">🚗</div><div class="ct-name" id="home-garage-name">Garage</div></div>
         </div>
+      </section>
+      <section class="panel-card p-groc flex col">
+        <button class="pc-title flex between center groc-title" data-action="open" data-app="groceries"><span>Groceries <span class="ug-count" id="groc-count"></span></span><span class="pc-link">Open ›</span></button>
+        <div class="pc-body grow ug-list" id="home-groc"></div>
+        <form class="ug-add flex" data-form="home-groc-add"><input class="field grow" id="home-groc-input" placeholder="Add an item…" autocomplete="off"><button class="btn primary small" type="submit">Add</button></form>
       </section>
     </div>
   </div>

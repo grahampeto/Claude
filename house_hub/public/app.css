@@ -622,3 +622,26 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
 @-webkit-keyframes ringglow { 70% { box-shadow: 0 0 0 22px rgba(34,165,89,0); } 100% { box-shadow: 0 0 0 0 rgba(34,165,89,0); } }
 @keyframes ringglow { 70% { box-shadow: 0 0 0 22px rgba(34,165,89,0); } 100% { box-shadow: 0 0 0 0 rgba(34,165,89,0); } }
 @media (max-width: 600px) { .call-btn { min-width: 0; -webkit-box-flex: 1; -webkit-flex: 1 1 0; flex: 1 1 0; margin: 0 8px; font-size: 18px; padding: 16px 10px; } .call-title { font-size: 24px; } }
+
+/* v3.3: Cameras panel (bottom left) and Groceries panel (bottom right) */
+.p-cams { -webkit-box-flex: 2; -webkit-flex: 2 1 0; flex: 2 1 0; margin-right: 12px; cursor: pointer; }
+.p-cams:active { background: #1e2637; }
+.p-groc { -webkit-box-flex: 3; -webkit-flex: 3 1 0; flex: 3 1 0; }
+.live-link { color: #ff6b6b; }
+.cam-tiles { -webkit-box-align: stretch; -webkit-align-items: stretch; align-items: stretch; overflow: hidden; }
+.cam-thumb { position: relative; background: #0d1118; border-radius: 12px; overflow: hidden; margin-right: 10px; min-width: 0; min-height: 90px; }
+.cam-thumb:last-child { margin-right: 0; }
+.cam-thumb img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; -o-object-fit: cover; object-fit: cover; }
+.ct-empty { position: absolute; top: 0; left: 0; right: 0; bottom: 24px; display: -webkit-box; display: -webkit-flex; display: flex;
+  -webkit-box-align: center; -webkit-align-items: center; align-items: center; -webkit-box-pack: center; -webkit-justify-content: center; justify-content: center; font-size: 34px; }
+.ct-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 10px; font-size: 14px; font-weight: 700;
+  background: -webkit-linear-gradient(top, rgba(0,0,0,0), rgba(0,0,0,.75)); background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.75)); }
+.groc-title { width: 100%; text-align: left; }
+.groc-title .ug-count { color: #6b7487; letter-spacing: 0; }
+.groc-title:active { opacity: .7; }
+.p-groc .ug-item { padding: 7px 0; font-size: 17px; border-bottom: 1px solid #232b3b; }
+.p-groc .ug-add { margin-top: 8px; }
+@media (max-width: 600px) {
+  .p-cams .cam-tiles { height: 150px; }
+  .p-groc .ug-list { -webkit-box-flex: 0; -webkit-flex: none; flex: none; max-height: none; overflow: visible; }
+}
