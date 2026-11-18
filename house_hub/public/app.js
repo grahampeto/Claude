@@ -129,6 +129,7 @@
         google: { url: (g.url || '').replace(/\/+$/, ''), token: g.token || '' },
         bins: { postcode: (v.bins && v.bins.postcode) || '', number: (v.bins && v.bins.number) || '', suffix: (v.bins && v.bins.suffix) || '' },
         weather: v.weather && typeof v.weather.lat === 'number' ? { name: v.weather.name || '', lat: v.weather.lat, lon: v.weather.lon } : d.weather,
+        gcalColors: v.gcalColors && typeof v.gcalColors === 'object' ? v.gcalColors : {},
         wifi: { ssid: (v.wifi && v.wifi.ssid) || '', password: (v.wifi && v.wifi.password) || '', security: (v.wifi && v.wifi.security) || 'WPA', hidden: !!(v.wifi && v.wifi.hidden) }
       };
     }
@@ -525,7 +526,19 @@
     return h + '</div>';
   }
   var GCAL_COLORS = ['#4f8cff', '#f5a623', '#7b61ff', '#3fbf7f', '#e86fa8'];
+  // Google Calendar's calendar colours (the palette in Google's colour menu).
+  var GCAL_PALETTE = [
+    ['Tomato', '#d50000'], ['Flamingo', '#e67c73'], ['Tangerine', '#f4511e'], ['Banana', '#f6bf26'], ['Sage', '#33b679'],
+    ['Basil', '#0b8043'], ['Peacock', '#039be5'], ['Blueberry', '#3f51b5'], ['Lavender', '#7986cb'], ['Grape', '#8e24aa'],
+    ['Graphite', '#616161'], ['Cherry blossom', '#d81b60'], ['Pumpkin', '#ef6c00'], ['Avocado', '#7cb342'],
+    ['Eucalyptus', '#009688'], ['Cobalt', '#4285f4'], ['Amethyst', '#9e69af'], ['Cocoa', '#795548'], ['Radicchio', '#ad1457'],
+    ['Citron', '#e4c441'], ['Pistachio', '#c0ca33'], ['Mango', '#f09300'], ['Wisteria', '#b39ddb'], ['Birch', '#a79b8e']
+  ];
+  // A Google calendar's colour as set in Settings → Calendar colours
+  // (Google doesn't share each person's calendar colours with the worker).
   function googleCalColor(id) {
+    var set = Store.data.settings.gcalColors[id];
+    if (set) return set;
     var cals = Store.google.calendars;
     for (var i = 0; i < cals.length; i++) if (cals[i].id === id) return GCAL_COLORS[i % GCAL_COLORS.length];
     return GCAL_COLORS[0];
@@ -566,7 +579,7 @@
         out.push({
           id: e.id, gcal: e.calendarId, title: e.title, location: e.location, allDay: e.allDay, who: e.who, colorId: e.colorId || '',
           start: parseISO(e.start), end: parseISO(e.end), calendar: e.calendar,
-          color: GCOLORS[e.colorId] || (e.who ? '' : googleCalColor(e.calendarId))
+          color: GCOLORS[e.colorId] || googleCalColor(e.calendarId)
         });
       });
     }
@@ -1492,6 +1505,7 @@
         '<div class="flex wrap" style="margin-top:12px"><button class="btn primary" data-action="set-google" style="margin:0 10px 10px 0">Save &amp; test</button>' +
         '<button class="btn danger" data-action="set-google-off" style="margin:0 10px 10px 0">Disconnect</button></div>' +
         '<div id="g-status" class="small"></div>' +
+        '<div id="gcal-colors"></div>' +
         '</div>' +
 
         '<div class="section-label">Bin collection (Mijn Afvalwijzer)</div>' +
@@ -1575,6 +1589,19 @@
           '<button class="del" data-action="set-delcal" data-i="' + i + '">✕</button></div>';
       }).join('') + '</div>' : '';
       if (Store.calendar.errors.length) $('set-cals').innerHTML += '<p class="small overdue">' + esc(Store.calendar.errors.join(' · ')) + '</p>';
+      var gc = $('gcal-colors');
+      if (gc) {
+        gc.innerHTML = Store.googleOn() && Store.google.calendars.length
+          ? '<label class="lbl" style="margin-top:14px">Calendar colours – pick the same colour each calendar has in Google Calendar</label>' +
+            Store.google.calendars.map(function (c) {
+              var hex = googleCalColor(c.id), name = '';
+              GCAL_PALETTE.forEach(function (p) { if (p[1] === hex) name = p[0]; });
+              return '<div class="row flex center" data-action="gcal-color" data-id="' + esc(c.id) + '" style="padding:10px 0;min-height:0">' +
+                '<span class="swatch-dot" style="background:' + hex + '"></span><div class="text grow">' + esc(c.name) + '</div>' +
+                '<span class="muted small">' + (Store.data.settings.gcalColors[c.id] ? name : 'not set') + ' ›</span></div>';
+            }).join('')
+          : '';
+      }
       var bs = $('bin-status'), B = Store.bins;
       if (B.status === 'off') { bs.className = 'small muted'; bs.textContent = Store.workerOn() ? 'Not set up.' : 'Set up the House Hub worker first.'; }
       else if (B.status === 'error') { bs.className = 'small sync bad'; bs.textContent = '● ' + B.error; }
@@ -1636,6 +1663,21 @@
         if (!cfg || !cfg.db || !cfg.key) return alert('That doesn\u2019t look like a House Hub setup link.');
         Store.setSync(cfg);
         $('set-db').value = cfg.db; $('set-key').value = cfg.key; $('set-paste').value = '';
+      },
+      'gcal-color': function (el) {
+        var id = el.getAttribute('data-id'), cur = Store.data.settings.gcalColors[id] || '';
+        var cal = Store.google.calendars.filter(function (c) { return c.id === id; })[0];
+        Modal.open('Colour for “' + (cal ? cal.name : id) + '”',
+          '<p class="muted small" style="margin-top:0">In Google Calendar, hover over the calendar → ⋮ to see its colour name, then pick the same one here.</p>' +
+          '<div class="seg swatches flex wrap gcal-pick" data-name="gcolor">' + GCAL_PALETTE.map(function (p) {
+            return '<button class="opt swatch named' + (cur === p[1] ? ' on' : '') + '" data-action="seg" data-value="' + p[1] + '" style="background:' + p[1] + '"><span>' + p[0] + '</span></button>';
+          }).join('') + '</div>',
+          function () {
+            var hex = Modal.seg('gcolor');
+            if (!hex) return false;
+            Store.data.settings.gcalColors[id] = hex;
+            Store.save('settings');
+          });
       },
       'set-weather': function () {
         var name = $('set-weather').value.trim();

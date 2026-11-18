@@ -657,3 +657,9 @@ a.btn { text-decoration: none; color: #fff; display: inline-block; }
   .agenda-split, .ag-half { display: block; }
   .ag-half .ag-scroll { -webkit-box-flex: 0; -webkit-flex: none; flex: none; overflow: visible; }
 }
+
+/* Google calendar colour picker */
+.swatch-dot { width: 20px; height: 20px; border-radius: 10px; margin-right: 12px; -webkit-flex-shrink: 0; flex-shrink: 0; }
+.gcal-pick .swatch.named { width: auto; height: auto; min-width: 116px; padding: 10px 12px; border-radius: 12px; text-align: left; }
+.gcal-pick .swatch.named span { font-size: 14px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.gcal-pick .swatch.named.on { box-shadow: 0 0 0 3px #10141c, 0 0 0 6px #fff; }
